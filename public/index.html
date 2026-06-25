@@ -73,22 +73,48 @@
       return 'bad';
     }
 
+    function formatPostQuota(details) {
+      const postsToday = details?.posts_today;
+      const dailyCap = details?.daily_post_cap;
+      if (typeof postsToday !== 'number' || typeof dailyCap !== 'number') {
+        return '<span class="muted">—</span>';
+      }
+      const atCap = postsToday >= dailyCap;
+      const cls = atCap ? 'warn' : 'ok';
+      return `<span class="${cls}">${postsToday}/${dailyCap} posted today</span>`;
+    }
+
+    function formatEmergencyPosts(details) {
+      const count = details?.emergency_posts_last_24h;
+      if (typeof count !== 'number') {
+        return '<span class="muted">—</span>';
+      }
+      const label = count === 1 ? 'emergency post' : 'emergency posts';
+      const cls = count > 0 ? 'warn' : 'muted';
+      return `<span class="${cls}">${count} ${label} in the last 24h</span>`;
+    }
+
     function renderTwitterBot(data) {
       const el = document.getElementById('twitter-bot');
       if (!data) {
         el.innerHTML = '<p>No heartbeat yet. Runs push status after each GitHub Actions job.</p>';
         return;
       }
-      const health = data.details?.api_health || {};
+      const details = data.details || {};
+      const health = details.api_health || {};
       const healthLine = Object.entries(health).map(([k, v]) => `${k}: <span class="${v === 'ok' ? 'ok' : 'bad'}">${v}</span>`).join(' · ');
+      const runPosts = typeof details.posted_tweets === 'number'
+        ? `${details.posted_tweets} this run`
+        : '—';
       el.innerHTML = `
         <div class="grid">
           <div>${freshnessBadge(data.reported_at, 90, 180)}</div>
           <div><strong>Status:</strong> <span class="${statusClass(data.status)}">${data.status}</span></div>
           <div><strong>Last run:</strong> ${formatRelativeTime(data.reported_at)} <span class="muted">(${new Date(data.reported_at).toLocaleString()})</span></div>
           <div><strong>Summary:</strong> ${data.summary || '—'}</div>
+          <div><strong>Daily quota:</strong> ${formatPostQuota(details)} <span class="muted">(${runPosts})</span></div>
+          <div><strong>Emergency posts:</strong> ${formatEmergencyPosts(details)}</div>
           <div><strong>API health:</strong> ${healthLine || '—'}</div>
-          <div><strong>Posted tweets:</strong> ${data.details?.posted_tweets ?? '—'}</div>
         </div>
       `;
     }
