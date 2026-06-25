@@ -1,0 +1,14 @@
+name = "ops-hub"
+compatibility_date = "2026-06-10"
+pages_build_output_dir = "public"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "ops-hub"
+database_id = "27f32641-0b1a-4072-bc2f-dfecd93b8fce"
+
+[vars]
+ENVIRONMENT = "production"
+PMD_HEALTH_URL = "https://prediction-market-divergence.pages.dev/health"
+
+# Secret (optional): wrangler pages secret put HEARTBEAT_SECRET --project-name=ops-hub

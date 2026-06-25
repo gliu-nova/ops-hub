@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Ops Hub</title>
+  <link rel="stylesheet" href="/css/style.css" />
+</head>
+<body>
+  <main>
+    <header>
+      <h1>Ops Hub</h1>
+      <p class="subtitle">twitter-bot · market-memory · prediction-market-divergence</p>
+    </header>
+
+    <section class="card">
+      <div class="row">
+        <h2>Overview</h2>
+        <div class="actions">
+          <button id="refresh" type="button">Refresh</button>
+        </div>
+      </div>
+      <div id="overview" class="muted">Loading…</div>
+    </section>
+
+    <section class="card">
+      <h2>twitter-bot</h2>
+      <div id="twitter-bot" class="muted">Loading…</div>
+    </section>
+
+    <section class="card">
+      <h2>market-memory</h2>
+      <div id="market-memory" class="muted">Loading…</div>
+    </section>
+
+    <section class="card">
+      <h2>prediction-market-divergence</h2>
+      <div id="pmd" class="muted">Loading…</div>
+    </section>
+
+    <section class="card">
+      <h2>Quick links</h2>
+      <div id="links" class="links muted">Loading…</div>
+    </section>
+  </main>
+  <script>
+    function formatRelativeTime(iso) {
+      if (!iso) return 'never';
+      const then = new Date(iso).getTime();
+      if (Number.isNaN(then)) return iso;
+      const minutes = Math.floor((Date.now() - then) / 60000);
+      if (minutes < 1) return 'just now';
+      if (minutes === 1) return '1 minute ago';
+      if (minutes < 60) return `${minutes} minutes ago`;
+      const hours = Math.floor(minutes / 60);
+      if (hours === 1) return '1 hour ago';
+      if (hours < 48) return `${hours} hours ago`;
+      const days = Math.floor(hours / 24);
+      return days === 1 ? '1 day ago' : `${days} days ago`;
+    }
+
+    function freshnessBadge(iso, healthyMinutes, delayedMinutes) {
+      if (!iso) return '<span class="badge badge-bad">No data</span>';
+      const minutes = Math.floor((Date.now() - new Date(iso).getTime()) / 60000);
+      if (minutes <= healthyMinutes) return '<span class="badge badge-ok">Healthy</span>';
+      if (minutes <= delayedMinutes) return '<span class="badge badge-warn">Delayed</span>';
+      return '<span class="badge badge-bad">Stale</span>';
+    }
+
+    function statusClass(status) {
+      if (status === 'ok') return 'ok';
+      if (status === 'degraded') return 'warn';
+      return 'bad';
+    }
+
+    function renderTwitterBot(data) {
+      const el = document.getElementById('twitter-bot');
+      if (!data) {
+        el.innerHTML = '<p>No heartbeat yet. Runs push status after each GitHub Actions job.</p>';
+        return;
+      }
+      const health = data.details?.api_health || {};
+      const healthLine = Object.entries(health).map(([k, v]) => `${k}: <span class="${v === 'ok' ? 'ok' : 'bad'}">${v}</span>`).join(' · ');
+      el.innerHTML = `
+        <div class="grid">
+          <div>${freshnessBadge(data.reported_at, 90, 180)}</div>
+          <div><strong>Status:</strong> <span class="${statusClass(data.status)}">${data.status}</span></div>
+          <div><strong>Last run:</strong> ${formatRelativeTime(data.reported_at)} <span class="muted">(${new Date(data.reported_at).toLocaleString()})</span></div>
+          <div><strong>Summary:</strong> ${data.summary || '—'}</div>
+          <div><strong>API health:</strong> ${healthLine || '—'}</div>
+          <div><strong>Posted tweets:</strong> ${data.details?.posted_tweets ?? '—'}</div>
+        </div>
+      `;
+    }
+
+    function renderMarketMemory(data) {
+      const el = document.getElementById('market-memory');
+      if (!data) {
+        el.innerHTML = '<p>No sync data yet (embedded in twitter-bot hourly run).</p>';
+        return;
+      }
+      const mm = data.details || data;
+      el.innerHTML = `
+        <div class="grid">
+          <div>${freshnessBadge(data.reported_at, 90, 180)}</div>
+          <div><strong>Sync mode:</strong> ${mm.liquidations_mode || '—'}</div>
+          <div><strong>Last ingested:</strong> ${mm.ingested ?? '—'} event(s)</div>
+          <div><strong>Total events in DB:</strong> ${mm.total_events ?? '—'}</div>
+          <div><strong>Sync skipped:</strong> ${mm.skipped ? 'yes' : 'no'}</div>
+        </div>
+      `;
+    }
+
+    function renderPmd(pmd) {
+      const el = document.getElementById('pmd');
+      if (!pmd || pmd.status === 'error') {
+        el.innerHTML = `<p class="bad">Could not reach PMD health: ${pmd?.error || 'unknown'}</p>`;
+        return;
+      }
+      el.innerHTML = `
+        <div class="grid">
+          <div>${freshnessBadge(pmd.last_poll_at, 20, 60)}</div>
+          <div><strong>Status:</strong> <span class="${statusClass(pmd.status)}">${pmd.status}</span></div>
+          <div><strong>Last poll:</strong> ${formatRelativeTime(pmd.last_poll_at)}</div>
+          <div><strong>Markets tracked:</strong> ${pmd.markets_tracked}</div>
+          <div><strong>Active opportunities:</strong> ${pmd.active_opportunities}</div>
+          <div><strong>Signals total:</strong> ${pmd.signals_total}</div>
+        </div>
+      `;
+    }
+
+    async function load() {
+      const res = await fetch('/api/services');
+      const data = await res.json();
+      document.getElementById('overview').innerHTML = `
+        <div class="grid">
+          <div><strong>Dashboard updated:</strong> ${new Date(data.updated_at).toLocaleString()}</div>
+          <div class="muted">twitter-bot + market-memory report via heartbeat; PMD polled live.</div>
+        </div>
+      `;
+      renderTwitterBot(data.twitter_bot);
+      renderMarketMemory(data.market_memory);
+      renderPmd(data.prediction_market_divergence);
+      const links = data.links || {};
+      document.getElementById('links').innerHTML = Object.entries(links)
+        .map(([k, url]) => `<a href="${url}" target="_blank" rel="noopener">${k.replaceAll('_', ' ')}</a>`)
+        .join('');
+    }
+
+    document.getElementById('refresh').addEventListener('click', load);
+    load();
+    setInterval(load, 60000);
+  </script>
+</body>
+</html>
