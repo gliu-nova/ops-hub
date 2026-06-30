@@ -34,7 +34,12 @@
     </section>
 
     <section class="card">
-      <h2>prediction-market-divergence</h2>
+      <div class="row">
+        <h2>prediction-market-divergence</h2>
+        <div class="actions">
+          <a class="button-link" href="/pmd.html">Ingestion &amp; output</a>
+        </div>
+      </div>
       <div id="pmd" class="muted">Loading…</div>
     </section>
 
@@ -165,7 +170,10 @@
     function renderPmd(pmd) {
       const el = document.getElementById('pmd');
       if (!pmd || pmd.status === 'error') {
-        el.innerHTML = `<p class="bad">Could not reach PMD health: ${pmd?.error || 'unknown'}</p>`;
+        el.innerHTML = `
+          <p class="bad">Could not reach PMD health: ${pmd?.error || 'unknown'}</p>
+          <p><a class="detail-link" href="/pmd.html">View ingestion &amp; output details →</a></p>
+        `;
         return;
       }
       el.innerHTML = `
@@ -191,9 +199,13 @@
       renderTwitterBot(data.twitter_bot);
       renderMarketMemory(data.market_memory);
       renderPmd(data.prediction_market_divergence);
-      const links = data.links || {};
+      const links = { pmd_ingestion_output: '/pmd.html', ...(data.links || {}) };
       document.getElementById('links').innerHTML = Object.entries(links)
-        .map(([k, url]) => `<a href="${url}" target="_blank" rel="noopener">${k.replaceAll('_', ' ')}</a>`)
+        .map(([k, url]) => {
+          const external = url.startsWith('http');
+          const attrs = external ? ' target="_blank" rel="noopener"' : '';
+          return `<a href="${url}"${attrs}>${k.replaceAll('_', ' ')}</a>`;
+        })
         .join('');
     }
 

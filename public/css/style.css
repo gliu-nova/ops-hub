@@ -40,6 +40,21 @@ button.secondary {
   color: var(--text);
   border: 1px solid var(--border);
 }
+.button-link {
+  display: inline-block;
+  background: transparent;
+  color: var(--accent);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.5rem 0.9rem;
+  font-weight: 600;
+  font-size: 0.9rem;
+  text-decoration: none;
+}
+.button-link:hover {
+  border-color: var(--accent);
+  background: rgba(94, 234, 212, 0.08);
+}
 .muted { color: var(--muted); }
 .ok { color: var(--accent); }
 .warn { color: #fbbf24; }
