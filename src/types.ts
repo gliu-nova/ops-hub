@@ -37,6 +37,15 @@ export interface PmdOutputSummary {
   last_opportunities_found: number;
 }
 
+export interface PmdVenueBreakdown {
+  markets_ingested: number;
+  markets_in_pairs: number;
+  markets_enriched: number | null;
+  snapshots_stored: number | null;
+  active_signals: number;
+  signals_total: number;
+}
+
 export interface PmdHealth {
   status: string;
   last_poll_at: string | null;
@@ -47,6 +56,10 @@ export interface PmdHealth {
   sources?: Record<string, string>;
   ingestion?: PmdIngestionSummary;
   output?: PmdOutputSummary;
+  venues?: {
+    kalshi: PmdVenueBreakdown;
+    polymarket: PmdVenueBreakdown;
+  };
 }
 
 export interface PmdSignal {
@@ -87,6 +100,7 @@ export interface PmdIngestedMarketsPage {
   total: number;
   offset: number;
   limit: number;
+  venue_counts?: { kalshi: number; polymarket: number };
   markets: PmdIngestedMarket[];
 }
 

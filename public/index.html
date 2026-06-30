@@ -147,24 +147,42 @@
       return `<span class="${ok ? 'ok' : 'bad'}">${value || 'unknown'}</span>`;
     }
 
+    function pmdVenues(pmd) {
+      if (pmd.venues) return pmd.venues;
+      const ingestion = pmd.ingestion || {};
+      return {
+        kalshi: {
+          markets_ingested: ingestion.kalshi_markets ?? 0,
+          markets_in_pairs: ingestion.matched_pairs ?? 0,
+          active_signals: pmd.output?.active_opportunities ?? pmd.active_opportunities ?? 0,
+          signals_total: pmd.output?.signals_total ?? pmd.signals_total ?? 0,
+        },
+        polymarket: {
+          markets_ingested: ingestion.polymarket_markets ?? 0,
+          markets_in_pairs: ingestion.matched_pairs ?? 0,
+          active_signals: pmd.output?.active_opportunities ?? pmd.active_opportunities ?? 0,
+          signals_total: pmd.output?.signals_total ?? pmd.signals_total ?? 0,
+        },
+      };
+    }
+
     function formatPmdIngestion(pmd) {
-      const ingestion = pmd.ingestion;
+      const venues = pmdVenues(pmd);
       const sources = pmd.sources || {};
       const mode = sources.mode || '—';
-      if (ingestion && (ingestion.kalshi_markets || ingestion.polymarket_markets)) {
-        return `Kalshi ${ingestion.kalshi_markets.toLocaleString()} · Polymarket ${ingestion.polymarket_markets.toLocaleString()} · ${ingestion.matched_pairs.toLocaleString()} matched pairs · ${mode}`;
-      }
-      const kalshi = sourceStatus(sources.kalshi);
-      const polymarket = sourceStatus(sources.polymarket);
-      return `${pmd.markets_tracked.toLocaleString()} markets · Kalshi ${kalshi} · Polymarket ${polymarket} · ${mode}`;
+      return `
+        <span class="venue-line"><strong>Kalshi</strong> ${venues.kalshi.markets_ingested.toLocaleString()} ingested · ${venues.kalshi.markets_in_pairs.toLocaleString()} in pairs</span>
+        <span class="venue-line"><strong>Polymarket</strong> ${venues.polymarket.markets_ingested.toLocaleString()} ingested · ${venues.polymarket.markets_in_pairs.toLocaleString()} in pairs</span>
+        <span class="muted">${mode}</span>
+      `;
     }
 
     function formatPmdOutput(pmd) {
-      const output = pmd.output;
-      if (output) {
-        return `${output.active_opportunities.toLocaleString()} active · ${output.signals_total.toLocaleString()} total signals · ${output.last_opportunities_found.toLocaleString()} found last poll`;
-      }
-      return `${pmd.active_opportunities.toLocaleString()} active · ${pmd.signals_total.toLocaleString()} total signals`;
+      const venues = pmdVenues(pmd);
+      return `
+        <span class="venue-line"><strong>Kalshi</strong> ${venues.kalshi.active_signals.toLocaleString()} active · ${venues.kalshi.signals_total.toLocaleString()} total signals</span>
+        <span class="venue-line"><strong>Polymarket</strong> ${venues.polymarket.active_signals.toLocaleString()} active · ${venues.polymarket.signals_total.toLocaleString()} total signals</span>
+      `;
     }
 
     function renderPmd(pmd) {
@@ -180,8 +198,8 @@
         <div class="grid">
           <div>${freshnessBadge(pmd.last_poll_at, 20, 60)}</div>
           <div><strong>Status:</strong> <span class="${statusClass(pmd.status)}">${pmd.status}</span> · <strong>Last poll:</strong> ${formatRelativeTime(pmd.last_poll_at)}</div>
-          <div><strong>Ingestion:</strong> ${formatPmdIngestion(pmd)}</div>
-          <div><strong>Output:</strong> ${formatPmdOutput(pmd)}</div>
+          <div class="venue-summary"><strong>Ingestion</strong>${formatPmdIngestion(pmd)}</div>
+          <div class="venue-summary"><strong>Output</strong>${formatPmdOutput(pmd)}</div>
           <div><a class="detail-link" href="/pmd.html">View ingestion &amp; output details →</a></div>
         </div>
       `;

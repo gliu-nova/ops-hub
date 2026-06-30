@@ -25,6 +25,12 @@
     </section>
 
     <section class="card">
+      <h2>Venue breakdown</h2>
+      <p class="muted section-lead">Side-by-side ingestion and output for Kalshi vs Polymarket.</p>
+      <div id="venue-breakdown" class="venue-compare muted">Loading…</div>
+    </section>
+
+    <section class="card">
       <h2>Ingested markets</h2>
       <p class="muted section-lead">Every market counted in the last poll — searchable and paginated.</p>
       <div class="filters">
@@ -141,17 +147,77 @@
       return `${start}–${end} of ${total.toLocaleString()}`;
     }
 
+    function healthVenues(health) {
+      if (health?.venues) return health.venues;
+      const ingestion = health?.ingestion || {};
+      const output = health?.output || {};
+      const active = output.active_opportunities ?? health?.active_opportunities ?? 0;
+      const total = output.signals_total ?? health?.signals_total ?? 0;
+      const pairs = ingestion.matched_pairs ?? 0;
+      return {
+        kalshi: {
+          markets_ingested: ingestion.kalshi_markets ?? 0,
+          markets_in_pairs: pairs,
+          markets_enriched: null,
+          snapshots_stored: null,
+          active_signals: active,
+          signals_total: total,
+        },
+        polymarket: {
+          markets_ingested: ingestion.polymarket_markets ?? 0,
+          markets_in_pairs: pairs,
+          markets_enriched: null,
+          snapshots_stored: null,
+          active_signals: active,
+          signals_total: total,
+        },
+      };
+    }
+
+    function renderVenueCard(name, venue, data) {
+      const extra = venue === 'polymarket' && (data.markets_enriched != null || data.snapshots_stored != null)
+        ? `<div><span class="stat-label">Enriched / snapshots</span><span class="venue-stat-value">${formatNumber(data.markets_enriched)} / ${formatNumber(data.snapshots_stored)}</span></div>`
+        : '';
+      return `
+        <article class="venue-card venue-card-${venue}">
+          <h3><span class="venue-pill venue-${venue}">${name}</span></h3>
+          <div class="venue-metrics">
+            <div><span class="stat-label">Markets ingested</span><span class="venue-stat-value">${data.markets_ingested.toLocaleString()}</span></div>
+            <div><span class="stat-label">Markets in pairs</span><span class="venue-stat-value">${data.markets_in_pairs.toLocaleString()}</span></div>
+            ${extra}
+            <div><span class="stat-label">Active signals</span><span class="venue-stat-value">${data.active_signals.toLocaleString()}</span></div>
+            <div><span class="stat-label">Total signals</span><span class="venue-stat-value">${data.signals_total.toLocaleString()}</span></div>
+          </div>
+        </article>
+      `;
+    }
+
+    function renderVenueBreakdown(health) {
+      const el = document.getElementById('venue-breakdown');
+      if (!health || health.status === 'error') {
+        el.innerHTML = '<p class="bad">No venue data available.</p>';
+        return;
+      }
+      const venues = healthVenues(health);
+      const diff = venues.kalshi.markets_ingested - venues.polymarket.markets_ingested;
+      const diffLabel = diff === 0
+        ? 'Both venues ingested the same number of markets last poll.'
+        : `Kalshi ingested ${Math.abs(diff).toLocaleString()} more markets than Polymarket last poll.`;
+      el.innerHTML = `
+        <div class="venue-compare-grid">
+          ${renderVenueCard('Kalshi', 'kalshi', venues.kalshi)}
+          ${renderVenueCard('Polymarket', 'polymarket', venues.polymarket)}
+        </div>
+        <p class="muted table-note">${diffLabel}</p>
+      `;
+    }
+
     function renderStatus(health) {
       if (!health || health.status === 'error') {
         document.getElementById('status').innerHTML = `<p class="bad">Could not reach PMD: ${escapeHtml(health?.error || 'unknown')}</p>`;
         return;
       }
-      const ingestion = health.ingestion || {
-        total_markets: health.markets_tracked,
-        kalshi_markets: 0,
-        polymarket_markets: 0,
-        matched_pairs: 0,
-      };
+      const venues = healthVenues(health);
       const errorLine = health.last_error
         ? `<div class="bad"><strong>Last error:</strong> ${escapeHtml(health.last_error)}</div>`
         : '';
@@ -159,7 +225,8 @@
         <div class="grid">
           <div><strong>Status:</strong> <span class="${health.status === 'ok' ? 'ok' : 'warn'}">${escapeHtml(health.status)}</span></div>
           <div><strong>Last poll:</strong> ${formatRelativeTime(health.last_poll_at)} <span class="muted">(${health.last_poll_at ? new Date(health.last_poll_at).toLocaleString() : '—'})</span></div>
-          <div><strong>Snapshot:</strong> ${ingestion.total_markets.toLocaleString()} markets · Kalshi ${ingestion.kalshi_markets.toLocaleString()} · Polymarket ${ingestion.polymarket_markets.toLocaleString()} · ${ingestion.matched_pairs.toLocaleString()} matched pairs</div>
+          <div><strong>Kalshi ingested:</strong> ${venues.kalshi.markets_ingested.toLocaleString()} markets</div>
+          <div><strong>Polymarket ingested:</strong> ${venues.polymarket.markets_ingested.toLocaleString()} markets</div>
           ${errorLine}
         </div>
       `;
@@ -182,7 +249,11 @@
         return;
       }
 
-      meta.innerHTML = `Snapshot from <strong>${new Date(data.poll_ts).toLocaleString()}</strong> · showing ${pageLabel(data.offset, data.limit, data.total)}`;
+      const counts = data.venue_counts || { kalshi: 0, polymarket: 0 };
+      const filterLabel = marketState.venue
+        ? ` · filtered to <strong>${escapeHtml(marketState.venue)}</strong>`
+        : ` · <strong>Kalshi ${counts.kalshi.toLocaleString()}</strong> · <strong>Polymarket ${counts.polymarket.toLocaleString()}</strong>`;
+      meta.innerHTML = `Snapshot from <strong>${new Date(data.poll_ts).toLocaleString()}</strong>${filterLabel} · showing ${pageLabel(data.offset, data.limit, data.total)}`;
       if (!data.markets?.length) {
         body.innerHTML = '<tr><td colspan="5" class="muted">No markets match this filter.</td></tr>';
       } else {
@@ -274,17 +345,30 @@
     }
 
     function renderOutput(health, opportunities, signals) {
+      const venues = healthVenues(health || {});
       const summary = health?.output || {
         active_opportunities: health?.active_opportunities ?? 0,
         signals_total: health?.signals_total ?? 0,
         last_opportunities_found: 0,
       };
       document.getElementById('output-summary').innerHTML = `
-        <div class="stat-grid">
-          <div class="stat"><span class="stat-label">Active opportunities</span><span class="stat-value">${summary.active_opportunities.toLocaleString()}</span></div>
-          <div class="stat"><span class="stat-label">Total signals</span><span class="stat-value">${summary.signals_total.toLocaleString()}</span></div>
-          <div class="stat"><span class="stat-label">Found last poll</span><span class="stat-value">${summary.last_opportunities_found.toLocaleString()}</span></div>
+        <div class="venue-compare-grid">
+          <article class="venue-card venue-card-kalshi">
+            <h3><span class="venue-pill venue-kalshi">Kalshi output</span></h3>
+            <div class="venue-metrics">
+              <div><span class="stat-label">Active signals</span><span class="venue-stat-value">${venues.kalshi.active_signals.toLocaleString()}</span></div>
+              <div><span class="stat-label">Total signals</span><span class="venue-stat-value">${venues.kalshi.signals_total.toLocaleString()}</span></div>
+            </div>
+          </article>
+          <article class="venue-card venue-card-polymarket">
+            <h3><span class="venue-pill venue-polymarket">Polymarket output</span></h3>
+            <div class="venue-metrics">
+              <div><span class="stat-label">Active signals</span><span class="venue-stat-value">${venues.polymarket.active_signals.toLocaleString()}</span></div>
+              <div><span class="stat-label">Total signals</span><span class="venue-stat-value">${venues.polymarket.signals_total.toLocaleString()}</span></div>
+            </div>
+          </article>
         </div>
+        <p class="muted table-note">Cross-venue opportunities found last poll: ${summary.last_opportunities_found.toLocaleString()}</p>
       `;
 
       const oppEl = document.getElementById('opportunities');
@@ -340,6 +424,7 @@
       const res = await fetch('/api/pmd');
       const data = await res.json();
       renderStatus(data.health);
+      renderVenueBreakdown(data.health);
       renderOutput(data.health, data.opportunities, data.signals);
     }
 
