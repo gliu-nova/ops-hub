@@ -11,7 +11,7 @@
     <header>
       <p class="back-link"><a href="/">← Ops Hub</a></p>
       <h1>prediction-market-divergence</h1>
-      <p class="subtitle">Ingestion sources, market counts, and signal output</p>
+      <p class="subtitle">Exact markets ingested, matched pairs, and signal output</p>
     </header>
 
     <section class="card">
@@ -25,12 +25,68 @@
     </section>
 
     <section class="card">
-      <h2>Ingestion</h2>
-      <div id="ingestion" class="muted">Loading…</div>
+      <h2>Ingested markets</h2>
+      <p class="muted section-lead">Every market counted in the last poll — searchable and paginated.</p>
+      <div class="filters">
+        <label>
+          Search
+          <input id="market-search" type="search" placeholder="title, topic, market id…" />
+        </label>
+        <label>
+          Venue
+          <select id="market-venue">
+            <option value="">All</option>
+            <option value="kalshi">Kalshi</option>
+            <option value="polymarket">Polymarket</option>
+          </select>
+        </label>
+        <button id="market-apply" type="button" class="secondary">Apply</button>
+      </div>
+      <div id="markets-meta" class="muted">Loading…</div>
+      <div class="table-wrap">
+        <table class="data-table market-table">
+          <thead>
+            <tr>
+              <th>Venue</th>
+              <th>Market</th>
+              <th>Topic</th>
+              <th>Prob</th>
+              <th>Volume</th>
+            </tr>
+          </thead>
+          <tbody id="markets-body">
+            <tr><td colspan="5" class="muted">Loading…</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="pager">
+        <button id="markets-prev" type="button" class="secondary" disabled>Previous</button>
+        <span id="markets-page" class="muted">—</span>
+        <button id="markets-next" type="button" class="secondary" disabled>Next</button>
+      </div>
     </section>
 
     <section class="card">
-      <h2>Output</h2>
+      <h2>Matched pairs</h2>
+      <p class="muted section-lead">Cross-venue markets linked for divergence detection.</p>
+      <div class="filters">
+        <label>
+          Search
+          <input id="pair-search" type="search" placeholder="title, topic, match key…" />
+        </label>
+        <button id="pair-apply" type="button" class="secondary">Apply</button>
+      </div>
+      <div id="pairs-meta" class="muted">Loading…</div>
+      <div id="pairs-list" class="item-list muted">Loading…</div>
+      <div class="pager">
+        <button id="pairs-prev" type="button" class="secondary" disabled>Previous</button>
+        <span id="pairs-page" class="muted">—</span>
+        <button id="pairs-next" type="button" class="secondary" disabled>Next</button>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2>Output signals</h2>
       <div id="output-summary" class="muted">Loading…</div>
       <div id="opportunities" class="item-list muted">Loading…</div>
       <h3 class="section-subhead">Latest signals</h3>
@@ -38,6 +94,10 @@
     </section>
   </main>
   <script>
+    const PAGE_SIZE = 50;
+    const marketState = { offset: 0, q: '', venue: '' };
+    const pairState = { offset: 0, q: '' };
+
     function formatRelativeTime(iso) {
       if (!iso) return 'never';
       const then = new Date(iso).getTime();
@@ -61,32 +121,29 @@
         .replace(/"/g, '&quot;');
     }
 
+    function formatProb(value) {
+      return `${(Number(value) * 100).toFixed(1)}%`;
+    }
+
+    function formatNumber(value) {
+      if (value === null || value === undefined || Number.isNaN(Number(value))) return '—';
+      return Number(value).toLocaleString(undefined, { maximumFractionDigits: 0 });
+    }
+
     function sourceClass(value) {
       return value === 'ok' || value === 'configured' ? 'ok' : 'bad';
+    }
+
+    function pageLabel(offset, limit, total) {
+      if (!total) return '0 of 0';
+      const start = offset + 1;
+      const end = Math.min(offset + limit, total);
+      return `${start}–${end} of ${total.toLocaleString()}`;
     }
 
     function renderStatus(health) {
       if (!health || health.status === 'error') {
         document.getElementById('status').innerHTML = `<p class="bad">Could not reach PMD: ${escapeHtml(health?.error || 'unknown')}</p>`;
-        return;
-      }
-      const errorLine = health.last_error
-        ? `<div class="bad"><strong>Last error:</strong> ${escapeHtml(health.last_error)}</div>`
-        : '';
-      document.getElementById('status').innerHTML = `
-        <div class="grid">
-          <div><strong>Status:</strong> <span class="${health.status === 'ok' ? 'ok' : 'warn'}">${escapeHtml(health.status)}</span></div>
-          <div><strong>Last poll:</strong> ${formatRelativeTime(health.last_poll_at)} <span class="muted">(${health.last_poll_at ? new Date(health.last_poll_at).toLocaleString() : '—'})</span></div>
-          ${errorLine}
-          <div class="muted">Updated ${new Date().toLocaleString()}</div>
-        </div>
-      `;
-    }
-
-    function renderIngestion(health) {
-      const el = document.getElementById('ingestion');
-      if (!health || health.status === 'error') {
-        el.innerHTML = '<p class="bad">No ingestion data.</p>';
         return;
       }
       const ingestion = health.ingestion || {
@@ -95,28 +152,107 @@
         polymarket_markets: 0,
         matched_pairs: 0,
       };
-      const sources = health.sources || {};
-      const rows = Object.entries(sources).map(([key, value]) => `
-        <tr>
-          <td>${escapeHtml(key.replaceAll('_', ' '))}</td>
-          <td class="${sourceClass(value)}">${escapeHtml(value)}</td>
-        </tr>
-      `).join('');
-      el.innerHTML = `
-        <div class="stat-grid">
-          <div class="stat"><span class="stat-label">Total markets</span><span class="stat-value">${ingestion.total_markets.toLocaleString()}</span></div>
-          <div class="stat"><span class="stat-label">Kalshi</span><span class="stat-value">${ingestion.kalshi_markets.toLocaleString()}</span></div>
-          <div class="stat"><span class="stat-label">Polymarket</span><span class="stat-value">${ingestion.polymarket_markets.toLocaleString()}</span></div>
-          <div class="stat"><span class="stat-label">Matched pairs</span><span class="stat-value">${ingestion.matched_pairs.toLocaleString()}</span></div>
+      const errorLine = health.last_error
+        ? `<div class="bad"><strong>Last error:</strong> ${escapeHtml(health.last_error)}</div>`
+        : '';
+      document.getElementById('status').innerHTML = `
+        <div class="grid">
+          <div><strong>Status:</strong> <span class="${health.status === 'ok' ? 'ok' : 'warn'}">${escapeHtml(health.status)}</span></div>
+          <div><strong>Last poll:</strong> ${formatRelativeTime(health.last_poll_at)} <span class="muted">(${health.last_poll_at ? new Date(health.last_poll_at).toLocaleString() : '—'})</span></div>
+          <div><strong>Snapshot:</strong> ${ingestion.total_markets.toLocaleString()} markets · Kalshi ${ingestion.kalshi_markets.toLocaleString()} · Polymarket ${ingestion.polymarket_markets.toLocaleString()} · ${ingestion.matched_pairs.toLocaleString()} matched pairs</div>
+          ${errorLine}
         </div>
-        <table class="data-table">
-          <thead><tr><th>Source</th><th>Status</th></tr></thead>
-          <tbody>${rows}</tbody>
-        </table>
-        ${ingestion.kalshi_markets === 0 && ingestion.polymarket_markets === 0 && ingestion.total_markets > 0
-          ? '<p class="muted table-note">Per-venue counts will appear after the next PMD poll.</p>'
-          : ''}
       `;
+    }
+
+    function renderMarkets(data) {
+      const meta = document.getElementById('markets-meta');
+      const body = document.getElementById('markets-body');
+      if (data?.status === 'error') {
+        meta.innerHTML = `<span class="bad">${escapeHtml(data.error)}</span>`;
+        body.innerHTML = '<tr><td colspan="5" class="bad">Could not load markets.</td></tr>';
+        return;
+      }
+      if (!data?.poll_ts) {
+        meta.innerHTML = 'No market snapshot yet. Data appears after the next successful PMD poll.';
+        body.innerHTML = '<tr><td colspan="5" class="muted">Waiting for first ingestion snapshot…</td></tr>';
+        document.getElementById('markets-page').textContent = '—';
+        document.getElementById('markets-prev').disabled = true;
+        document.getElementById('markets-next').disabled = true;
+        return;
+      }
+
+      meta.innerHTML = `Snapshot from <strong>${new Date(data.poll_ts).toLocaleString()}</strong> · showing ${pageLabel(data.offset, data.limit, data.total)}`;
+      if (!data.markets?.length) {
+        body.innerHTML = '<tr><td colspan="5" class="muted">No markets match this filter.</td></tr>';
+      } else {
+        body.innerHTML = data.markets.map((market) => `
+          <tr>
+            <td><span class="venue-pill venue-${escapeHtml(market.venue)}">${escapeHtml(market.venue)}</span></td>
+            <td>
+              <a href="${escapeHtml(market.url)}" target="_blank" rel="noopener">${escapeHtml(market.title)}</a>
+              <div class="cell-sub muted">${escapeHtml(market.market_id)}</div>
+            </td>
+            <td>${escapeHtml(market.topic || '—')}</td>
+            <td>${formatProb(market.probability)}</td>
+            <td>${formatNumber(market.volume)}</td>
+          </tr>
+        `).join('');
+      }
+
+      document.getElementById('markets-page').textContent = pageLabel(data.offset, data.limit, data.total);
+      document.getElementById('markets-prev').disabled = data.offset <= 0;
+      document.getElementById('markets-next').disabled = data.offset + data.limit >= data.total;
+    }
+
+    function renderPairs(data) {
+      const meta = document.getElementById('pairs-meta');
+      const list = document.getElementById('pairs-list');
+      if (data?.status === 'error') {
+        meta.innerHTML = `<span class="bad">${escapeHtml(data.error)}</span>`;
+        list.innerHTML = '<p class="bad">Could not load matched pairs.</p>';
+        return;
+      }
+      if (!data?.poll_ts) {
+        meta.innerHTML = 'No matched-pair snapshot yet.';
+        list.innerHTML = '<p class="muted">Waiting for first ingestion snapshot…</p>';
+        document.getElementById('pairs-page').textContent = '—';
+        document.getElementById('pairs-prev').disabled = true;
+        document.getElementById('pairs-next').disabled = true;
+        return;
+      }
+
+      meta.innerHTML = `Snapshot from <strong>${new Date(data.poll_ts).toLocaleString()}</strong> · showing ${pageLabel(data.offset, data.limit, data.total)}`;
+      if (!data.pairs?.length) {
+        list.innerHTML = '<p class="muted">No matched pairs for this filter.</p>';
+      } else {
+        list.innerHTML = data.pairs.map((pair) => {
+          const gap = Math.abs(pair.market_a.probability - pair.market_b.probability) * 100;
+          return `
+            <article class="item-card">
+              <div class="item-head">
+                <h3>${escapeHtml(pair.title)}</h3>
+                <span class="item-meta">gap ${gap.toFixed(1)} pts</span>
+              </div>
+              <p>
+                <span class="venue-pill venue-${escapeHtml(pair.market_a.venue)}">${escapeHtml(pair.market_a.venue)}</span>
+                <a href="${escapeHtml(pair.market_a.url)}" target="_blank" rel="noopener">${escapeHtml(pair.market_a.title)}</a>
+                · ${formatProb(pair.market_a.probability)}
+              </p>
+              <p>
+                <span class="venue-pill venue-${escapeHtml(pair.market_b.venue)}">${escapeHtml(pair.market_b.venue)}</span>
+                <a href="${escapeHtml(pair.market_b.url)}" target="_blank" rel="noopener">${escapeHtml(pair.market_b.title)}</a>
+                · ${formatProb(pair.market_b.probability)}
+              </p>
+              <p class="muted">${escapeHtml(pair.topic)} · ${escapeHtml(pair.match_key)}</p>
+            </article>
+          `;
+        }).join('');
+      }
+
+      document.getElementById('pairs-page').textContent = pageLabel(data.offset, data.limit, data.total);
+      document.getElementById('pairs-prev').disabled = data.offset <= 0;
+      document.getElementById('pairs-next').disabled = data.offset + data.limit >= data.total;
     }
 
     function renderSignalItem(item) {
@@ -171,17 +307,83 @@
       }
     }
 
-    async function load() {
+    async function fetchMarkets() {
+      const params = new URLSearchParams({
+        offset: String(marketState.offset),
+        limit: String(PAGE_SIZE),
+      });
+      if (marketState.q) params.set('q', marketState.q);
+      if (marketState.venue) params.set('venue', marketState.venue);
+      const res = await fetch(`/api/pmd/markets?${params}`);
+      return res.json();
+    }
+
+    async function fetchPairs() {
+      const params = new URLSearchParams({
+        offset: String(pairState.offset),
+        limit: String(PAGE_SIZE),
+      });
+      if (pairState.q) params.set('q', pairState.q);
+      const res = await fetch(`/api/pmd/pairs?${params}`);
+      return res.json();
+    }
+
+    async function loadMarkets() {
+      renderMarkets(await fetchMarkets());
+    }
+
+    async function loadPairs() {
+      renderPairs(await fetchPairs());
+    }
+
+    async function loadSummary() {
       const res = await fetch('/api/pmd');
       const data = await res.json();
       renderStatus(data.health);
-      renderIngestion(data.health);
       renderOutput(data.health, data.opportunities, data.signals);
     }
 
+    async function load() {
+      await Promise.all([loadSummary(), loadMarkets(), loadPairs()]);
+    }
+
     document.getElementById('refresh').addEventListener('click', load);
+    document.getElementById('market-apply').addEventListener('click', () => {
+      marketState.offset = 0;
+      marketState.q = document.getElementById('market-search').value.trim();
+      marketState.venue = document.getElementById('market-venue').value;
+      loadMarkets();
+    });
+    document.getElementById('market-search').addEventListener('keydown', (event) => {
+      if (event.key === 'Enter') document.getElementById('market-apply').click();
+    });
+    document.getElementById('markets-prev').addEventListener('click', () => {
+      marketState.offset = Math.max(0, marketState.offset - PAGE_SIZE);
+      loadMarkets();
+    });
+    document.getElementById('markets-next').addEventListener('click', () => {
+      marketState.offset += PAGE_SIZE;
+      loadMarkets();
+    });
+    document.getElementById('pair-apply').addEventListener('click', () => {
+      pairState.offset = 0;
+      pairState.q = document.getElementById('pair-search').value.trim();
+      loadPairs();
+    });
+    document.getElementById('pair-search').addEventListener('keydown', (event) => {
+      if (event.key === 'Enter') document.getElementById('pair-apply').click();
+    });
+    document.getElementById('pairs-prev').addEventListener('click', () => {
+      pairState.offset = Math.max(0, pairState.offset - PAGE_SIZE);
+      loadPairs();
+    });
+    document.getElementById('pairs-next').addEventListener('click', () => {
+      pairState.offset += PAGE_SIZE;
+      loadPairs();
+    });
+
     load();
-    setInterval(load, 60000);
+    setInterval(loadSummary, 60000);
   </script>
 </body>
 </html>

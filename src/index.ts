@@ -105,6 +105,32 @@ app.get("/api/pmd", async (c) => {
   return c.json(await fetchPmdDetail(pmdUrl));
 });
 
+app.get("/api/pmd/markets", async (c) => {
+  const pmdUrl = c.env.PMD_HEALTH_URL ?? "https://prediction-market-divergence.pages.dev/health";
+  const base = pmdBaseUrl(pmdUrl);
+  const params = new URLSearchParams();
+  for (const key of ["offset", "limit", "venue", "q"] as const) {
+    const value = c.req.query(key);
+    if (value) params.set(key, value);
+  }
+  const query = params.toString();
+  const url = `${base}/ingestion/markets${query ? `?${query}` : ""}`;
+  return c.json(await fetchPmdJson(url));
+});
+
+app.get("/api/pmd/pairs", async (c) => {
+  const pmdUrl = c.env.PMD_HEALTH_URL ?? "https://prediction-market-divergence.pages.dev/health";
+  const base = pmdBaseUrl(pmdUrl);
+  const params = new URLSearchParams();
+  for (const key of ["offset", "limit", "q"] as const) {
+    const value = c.req.query(key);
+    if (value) params.set(key, value);
+  }
+  const query = params.toString();
+  const url = `${base}/ingestion/pairs${query ? `?${query}` : ""}`;
+  return c.json(await fetchPmdJson(url));
+});
+
 app.get("/api/services/:id", async (c) => {
   const row = await getHeartbeat(c.env.DB, c.req.param("id"));
   if (!row) return c.json({ detail: "Not found" }, 404);

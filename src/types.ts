@@ -61,6 +61,43 @@ export interface PmdSignal {
   tweet_hint?: string;
 }
 
+export interface PmdIngestedMarket {
+  venue: string;
+  market_id: string;
+  title: string;
+  topic: string;
+  probability: number;
+  volume: number | null;
+  liquidity: number | null;
+  url: string;
+  match_key: string;
+  observed_at: string;
+}
+
+export interface PmdMatchedPair {
+  match_key: string;
+  topic: string;
+  title: string;
+  market_a: { venue: string; market_id: string; title: string; probability: number; url: string };
+  market_b: { venue: string; market_id: string; title: string; probability: number; url: string };
+}
+
+export interface PmdIngestedMarketsPage {
+  poll_ts: string | null;
+  total: number;
+  offset: number;
+  limit: number;
+  markets: PmdIngestedMarket[];
+}
+
+export interface PmdMatchedPairsPage {
+  poll_ts: string | null;
+  total: number;
+  offset: number;
+  limit: number;
+  pairs: PmdMatchedPair[];
+}
+
 export interface PmdDetailResponse {
   updated_at: string;
   health: PmdHealth | { status: "error"; error: string };

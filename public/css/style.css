@@ -125,3 +125,54 @@ button.secondary {
 }
 .item-card h3 { margin: 0; font-size: 0.95rem; }
 .item-meta { color: var(--muted); font-size: 0.85rem; white-space: nowrap; }
+.section-lead { margin: 0 0 1rem; font-size: 0.9rem; }
+.filters {
+  display: flex;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  align-items: end;
+  margin-bottom: 0.75rem;
+}
+.filters label {
+  display: grid;
+  gap: 0.25rem;
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+.filters input,
+.filters select {
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.45rem 0.6rem;
+  min-width: 220px;
+}
+.filters select { min-width: 140px; }
+.table-wrap {
+  overflow-x: auto;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+.market-table td,
+.market-table th { vertical-align: top; }
+.market-table a { color: var(--accent); text-decoration: none; }
+.market-table a:hover { text-decoration: underline; }
+.cell-sub { font-size: 0.8rem; margin-top: 0.15rem; }
+.venue-pill {
+  display: inline-block;
+  padding: 0.1rem 0.45rem;
+  border-radius: 999px;
+  font-size: 0.75rem;
+  font-weight: 700;
+  text-transform: lowercase;
+  margin-right: 0.35rem;
+}
+.venue-kalshi { background: rgba(251, 191, 36, 0.15); color: #fbbf24; }
+.venue-polymarket { background: rgba(96, 165, 250, 0.15); color: #93c5fd; }
+.pager {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin-top: 0.75rem;
+}
