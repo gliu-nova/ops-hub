@@ -1,7 +1,7 @@
 import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { ensureTables, getHeartbeat, listHeartbeats, upsertHeartbeat } from "./storage";
-import type { Env, HeartbeatPayload, PmdHealth } from "./types";
+import type { Env, HeartbeatPayload, PmdDetailResponse, PmdHealth, PmdSignal } from "./types";
 
 const app = new Hono<{ Bindings: Env }>();
 
@@ -18,16 +18,39 @@ function authHeartbeat(c: { env: Env; req: { header: (name: string) => string | 
   return auth === `Bearer ${secret}`;
 }
 
-async function fetchPmdHealth(url: string): Promise<PmdHealth | { status: "error"; error: string }> {
+function pmdBaseUrl(healthUrl: string): string {
+  return healthUrl.replace(/\/health\/?$/, "");
+}
+
+async function fetchPmdJson<T>(url: string): Promise<T | { status: "error"; error: string }> {
   try {
     const resp = await fetch(url, { headers: { accept: "application/json" } });
     if (!resp.ok) {
       return { status: "error", error: `HTTP ${resp.status}` };
     }
-    return (await resp.json()) as PmdHealth;
+    return (await resp.json()) as T;
   } catch (err) {
     return { status: "error", error: err instanceof Error ? err.message : String(err) };
   }
+}
+
+async function fetchPmdHealth(url: string): Promise<PmdHealth | { status: "error"; error: string }> {
+  return fetchPmdJson<PmdHealth>(url);
+}
+
+async function fetchPmdDetail(healthUrl: string): Promise<PmdDetailResponse> {
+  const base = pmdBaseUrl(healthUrl);
+  const [health, opportunities, signals] = await Promise.all([
+    fetchPmdHealth(healthUrl),
+    fetchPmdJson<{ opportunities: PmdSignal[]; count: number }>(`${base}/opportunities?limit=50`),
+    fetchPmdJson<{ signals: PmdSignal[]; count: number }>(`${base}/signals?limit=50`),
+  ]);
+  return {
+    updated_at: new Date().toISOString(),
+    health,
+    opportunities,
+    signals,
+  };
 }
 
 app.get("/health", (c) =>
@@ -75,6 +98,11 @@ app.get("/api/services", async (c) => {
       pmd_dashboard: "https://prediction-market-divergence.pages.dev/",
     },
   });
+});
+
+app.get("/api/pmd", async (c) => {
+  const pmdUrl = c.env.PMD_HEALTH_URL ?? "https://prediction-market-divergence.pages.dev/health";
+  return c.json(await fetchPmdDetail(pmdUrl));
 });
 
 app.get("/api/services/:id", async (c) => {

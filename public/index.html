@@ -137,6 +137,31 @@
       `;
     }
 
+    function sourceStatus(value) {
+      const ok = value === 'ok' || value === 'configured';
+      return `<span class="${ok ? 'ok' : 'bad'}">${value || 'unknown'}</span>`;
+    }
+
+    function formatPmdIngestion(pmd) {
+      const ingestion = pmd.ingestion;
+      const sources = pmd.sources || {};
+      const mode = sources.mode || '—';
+      if (ingestion && (ingestion.kalshi_markets || ingestion.polymarket_markets)) {
+        return `Kalshi ${ingestion.kalshi_markets.toLocaleString()} · Polymarket ${ingestion.polymarket_markets.toLocaleString()} · ${ingestion.matched_pairs.toLocaleString()} matched pairs · ${mode}`;
+      }
+      const kalshi = sourceStatus(sources.kalshi);
+      const polymarket = sourceStatus(sources.polymarket);
+      return `${pmd.markets_tracked.toLocaleString()} markets · Kalshi ${kalshi} · Polymarket ${polymarket} · ${mode}`;
+    }
+
+    function formatPmdOutput(pmd) {
+      const output = pmd.output;
+      if (output) {
+        return `${output.active_opportunities.toLocaleString()} active · ${output.signals_total.toLocaleString()} total signals · ${output.last_opportunities_found.toLocaleString()} found last poll`;
+      }
+      return `${pmd.active_opportunities.toLocaleString()} active · ${pmd.signals_total.toLocaleString()} total signals`;
+    }
+
     function renderPmd(pmd) {
       const el = document.getElementById('pmd');
       if (!pmd || pmd.status === 'error') {
@@ -146,11 +171,10 @@
       el.innerHTML = `
         <div class="grid">
           <div>${freshnessBadge(pmd.last_poll_at, 20, 60)}</div>
-          <div><strong>Status:</strong> <span class="${statusClass(pmd.status)}">${pmd.status}</span></div>
-          <div><strong>Last poll:</strong> ${formatRelativeTime(pmd.last_poll_at)}</div>
-          <div><strong>Markets tracked:</strong> ${pmd.markets_tracked}</div>
-          <div><strong>Active opportunities:</strong> ${pmd.active_opportunities}</div>
-          <div><strong>Signals total:</strong> ${pmd.signals_total}</div>
+          <div><strong>Status:</strong> <span class="${statusClass(pmd.status)}">${pmd.status}</span> · <strong>Last poll:</strong> ${formatRelativeTime(pmd.last_poll_at)}</div>
+          <div><strong>Ingestion:</strong> ${formatPmdIngestion(pmd)}</div>
+          <div><strong>Output:</strong> ${formatPmdOutput(pmd)}</div>
+          <div><a class="detail-link" href="/pmd.html">View ingestion &amp; output details →</a></div>
         </div>
       `;
     }
