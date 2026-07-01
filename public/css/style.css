@@ -215,3 +215,18 @@ button.secondary {
 }
 .venue-card-kalshi { border-color: rgba(251, 191, 36, 0.25); }
 .venue-card-polymarket { border-color: rgba(96, 165, 250, 0.25); }
+.count-badge { font-size: 0.9rem; font-weight: 500; }
+.venue-jump-links {
+  display: flex;
+  gap: 1rem;
+  flex-wrap: wrap;
+  margin-top: 0.75rem;
+  font-size: 0.9rem;
+}
+.venue-jump-links a { color: var(--accent); text-decoration: none; }
+.venue-jump-links a:hover { text-decoration: underline; }
+.venue-market-card { scroll-margin-top: 1rem; }
+.section-lead code {
+  font-size: 0.85em;
+  color: var(--muted);
+}

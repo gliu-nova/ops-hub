@@ -30,45 +30,87 @@
       <div id="venue-breakdown" class="venue-compare muted">Loading…</div>
     </section>
 
-    <section class="card">
-      <h2>Ingested markets</h2>
-      <p class="muted section-lead">Every market counted in the last poll — searchable and paginated.</p>
+    <section id="kalshi-markets" class="card venue-market-card venue-market-card-kalshi">
+      <h2>Kalshi markets <span id="kalshi-markets-count" class="count-badge muted">…</span></h2>
+      <p class="muted section-lead">Every Kalshi market from the latest poll. Paginate or search to browse all of them.</p>
       <div class="filters">
         <label>
           Search
-          <input id="market-search" type="search" placeholder="title, topic, market id…" />
+          <input id="kalshi-search" type="search" placeholder="title, topic, market id…" />
         </label>
         <label>
-          Venue
-          <select id="market-venue">
-            <option value="">All</option>
-            <option value="kalshi">Kalshi</option>
-            <option value="polymarket">Polymarket</option>
+          Per page
+          <select id="kalshi-page-size">
+            <option value="50">50</option>
+            <option value="100" selected>100</option>
+            <option value="200">200</option>
           </select>
         </label>
-        <button id="market-apply" type="button" class="secondary">Apply</button>
+        <button id="kalshi-apply" type="button" class="secondary">Apply</button>
       </div>
-      <div id="markets-meta" class="muted">Loading…</div>
+      <div id="kalshi-meta" class="muted">Loading…</div>
       <div class="table-wrap">
         <table class="data-table market-table">
           <thead>
             <tr>
-              <th>Venue</th>
               <th>Market</th>
               <th>Topic</th>
               <th>Prob</th>
               <th>Volume</th>
+              <th>Liquidity</th>
             </tr>
           </thead>
-          <tbody id="markets-body">
+          <tbody id="kalshi-body">
             <tr><td colspan="5" class="muted">Loading…</td></tr>
           </tbody>
         </table>
       </div>
       <div class="pager">
-        <button id="markets-prev" type="button" class="secondary" disabled>Previous</button>
-        <span id="markets-page" class="muted">—</span>
-        <button id="markets-next" type="button" class="secondary" disabled>Next</button>
+        <button id="kalshi-prev" type="button" class="secondary" disabled>Previous</button>
+        <span id="kalshi-page" class="muted">—</span>
+        <button id="kalshi-next" type="button" class="secondary" disabled>Next</button>
+      </div>
+    </section>
+
+    <section id="polymarket-markets" class="card venue-market-card venue-market-card-polymarket">
+      <h2>Polymarket markets <span id="polymarket-markets-count" class="count-badge muted">…</span></h2>
+      <p class="muted section-lead">Every Polymarket market from the latest poll. Polymarket ingestion is currently capped at <strong>100 markets per poll</strong> (<code>POLYMARKET_MAX_MARKETS</code>) to stay within Cloudflare Worker limits — Kalshi fetches all open markets (~4,800+) in paginated batches.</p>
+      <div class="filters">
+        <label>
+          Search
+          <input id="polymarket-search" type="search" placeholder="title, topic, market id…" />
+        </label>
+        <label>
+          Per page
+          <select id="polymarket-page-size">
+            <option value="50">50</option>
+            <option value="100" selected>100</option>
+            <option value="200">200</option>
+          </select>
+        </label>
+        <button id="polymarket-apply" type="button" class="secondary">Apply</button>
+      </div>
+      <div id="polymarket-meta" class="muted">Loading…</div>
+      <div class="table-wrap">
+        <table class="data-table market-table">
+          <thead>
+            <tr>
+              <th>Market</th>
+              <th>Topic</th>
+              <th>Prob</th>
+              <th>Volume</th>
+              <th>Liquidity</th>
+            </tr>
+          </thead>
+          <tbody id="polymarket-body">
+            <tr><td colspan="5" class="muted">Loading…</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="pager">
+        <button id="polymarket-prev" type="button" class="secondary" disabled>Previous</button>
+        <span id="polymarket-page" class="muted">—</span>
+        <button id="polymarket-next" type="button" class="secondary" disabled>Next</button>
       </div>
     </section>
 
@@ -100,9 +142,12 @@
     </section>
   </main>
   <script>
-    const PAGE_SIZE = 50;
-    const marketState = { offset: 0, q: '', venue: '' };
+    const PAIR_PAGE_SIZE = 50;
     const pairState = { offset: 0, q: '' };
+    const venueMarketState = {
+      kalshi: { offset: 0, q: '', pageSize: 100 },
+      polymarket: { offset: 0, q: '', pageSize: 100 },
+    };
 
     function formatRelativeTime(iso) {
       if (!iso) return 'never';
@@ -209,7 +254,13 @@
           ${renderVenueCard('Polymarket', 'polymarket', venues.polymarket)}
         </div>
         <p class="muted table-note">${diffLabel}</p>
+        <p class="venue-jump-links">
+          <a href="#kalshi-markets">Browse all Kalshi markets →</a>
+          <a href="#polymarket-markets">Browse all Polymarket markets →</a>
+        </p>
       `;
+      document.getElementById('kalshi-markets-count').textContent = `(${venues.kalshi.markets_ingested.toLocaleString()})`;
+      document.getElementById('polymarket-markets-count').textContent = `(${venues.polymarket.markets_ingested.toLocaleString()})`;
     }
 
     function renderStatus(health) {
@@ -232,9 +283,9 @@
       `;
     }
 
-    function renderMarkets(data) {
-      const meta = document.getElementById('markets-meta');
-      const body = document.getElementById('markets-body');
+    function renderVenueMarkets(venue, data) {
+      const meta = document.getElementById(`${venue}-meta`);
+      const body = document.getElementById(`${venue}-body`);
       if (data?.status === 'error') {
         meta.innerHTML = `<span class="bad">${escapeHtml(data.error)}</span>`;
         body.innerHTML = '<tr><td colspan="5" class="bad">Could not load markets.</td></tr>';
@@ -243,23 +294,21 @@
       if (!data?.poll_ts) {
         meta.innerHTML = 'No market snapshot yet. Data appears after the next successful PMD poll.';
         body.innerHTML = '<tr><td colspan="5" class="muted">Waiting for first ingestion snapshot…</td></tr>';
-        document.getElementById('markets-page').textContent = '—';
-        document.getElementById('markets-prev').disabled = true;
-        document.getElementById('markets-next').disabled = true;
+        document.getElementById(`${venue}-page`).textContent = '—';
+        document.getElementById(`${venue}-prev`).disabled = true;
+        document.getElementById(`${venue}-next`).disabled = true;
         return;
       }
 
-      const counts = data.venue_counts || { kalshi: 0, polymarket: 0 };
-      const filterLabel = marketState.venue
-        ? ` · filtered to <strong>${escapeHtml(marketState.venue)}</strong>`
-        : ` · <strong>Kalshi ${counts.kalshi.toLocaleString()}</strong> · <strong>Polymarket ${counts.polymarket.toLocaleString()}</strong>`;
-      meta.innerHTML = `Snapshot from <strong>${new Date(data.poll_ts).toLocaleString()}</strong>${filterLabel} · showing ${pageLabel(data.offset, data.limit, data.total)}`;
+      const searchLabel = venueMarketState[venue].q
+        ? ` · search <strong>${escapeHtml(venueMarketState[venue].q)}</strong>`
+        : '';
+      meta.innerHTML = `Snapshot from <strong>${new Date(data.poll_ts).toLocaleString()}</strong> · ${data.total.toLocaleString()} ${venue} markets${searchLabel} · showing ${pageLabel(data.offset, data.limit, data.total)}`;
       if (!data.markets?.length) {
         body.innerHTML = '<tr><td colspan="5" class="muted">No markets match this filter.</td></tr>';
       } else {
         body.innerHTML = data.markets.map((market) => `
           <tr>
-            <td><span class="venue-pill venue-${escapeHtml(market.venue)}">${escapeHtml(market.venue)}</span></td>
             <td>
               <a href="${escapeHtml(market.url)}" target="_blank" rel="noopener">${escapeHtml(market.title)}</a>
               <div class="cell-sub muted">${escapeHtml(market.market_id)}</div>
@@ -267,13 +316,14 @@
             <td>${escapeHtml(market.topic || '—')}</td>
             <td>${formatProb(market.probability)}</td>
             <td>${formatNumber(market.volume)}</td>
+            <td>${formatNumber(market.liquidity)}</td>
           </tr>
         `).join('');
       }
 
-      document.getElementById('markets-page').textContent = pageLabel(data.offset, data.limit, data.total);
-      document.getElementById('markets-prev').disabled = data.offset <= 0;
-      document.getElementById('markets-next').disabled = data.offset + data.limit >= data.total;
+      document.getElementById(`${venue}-page`).textContent = pageLabel(data.offset, data.limit, data.total);
+      document.getElementById(`${venue}-prev`).disabled = data.offset <= 0;
+      document.getElementById(`${venue}-next`).disabled = data.offset + data.limit >= data.total;
     }
 
     function renderPairs(data) {
@@ -391,13 +441,14 @@
       }
     }
 
-    async function fetchMarkets() {
+    async function fetchVenueMarkets(venue) {
+      const state = venueMarketState[venue];
       const params = new URLSearchParams({
-        offset: String(marketState.offset),
-        limit: String(PAGE_SIZE),
+        offset: String(state.offset),
+        limit: String(state.pageSize),
+        venue,
       });
-      if (marketState.q) params.set('q', marketState.q);
-      if (marketState.venue) params.set('venue', marketState.venue);
+      if (state.q) params.set('q', state.q);
       const res = await fetch(`/api/pmd/markets?${params}`);
       return res.json();
     }
@@ -405,15 +456,22 @@
     async function fetchPairs() {
       const params = new URLSearchParams({
         offset: String(pairState.offset),
-        limit: String(PAGE_SIZE),
+        limit: String(PAIR_PAGE_SIZE),
       });
       if (pairState.q) params.set('q', pairState.q);
       const res = await fetch(`/api/pmd/pairs?${params}`);
       return res.json();
     }
 
-    async function loadMarkets() {
-      renderMarkets(await fetchMarkets());
+    async function loadVenueMarkets(venue) {
+      renderVenueMarkets(venue, await fetchVenueMarkets(venue));
+    }
+
+    async function loadAllVenueMarkets() {
+      await Promise.all([
+        loadVenueMarkets('kalshi'),
+        loadVenueMarkets('polymarket'),
+      ]);
     }
 
     async function loadPairs() {
@@ -428,28 +486,34 @@
       renderOutput(data.health, data.opportunities, data.signals);
     }
 
+    function wireVenueMarketControls(venue) {
+      document.getElementById(`${venue}-apply`).addEventListener('click', () => {
+        venueMarketState[venue].offset = 0;
+        venueMarketState[venue].q = document.getElementById(`${venue}-search`).value.trim();
+        venueMarketState[venue].pageSize = parseInt(document.getElementById(`${venue}-page-size`).value, 10);
+        loadVenueMarkets(venue);
+      });
+      document.getElementById(`${venue}-search`).addEventListener('keydown', (event) => {
+        if (event.key === 'Enter') document.getElementById(`${venue}-apply`).click();
+      });
+      document.getElementById(`${venue}-prev`).addEventListener('click', () => {
+        const state = venueMarketState[venue];
+        state.offset = Math.max(0, state.offset - state.pageSize);
+        loadVenueMarkets(venue);
+      });
+      document.getElementById(`${venue}-next`).addEventListener('click', () => {
+        venueMarketState[venue].offset += venueMarketState[venue].pageSize;
+        loadVenueMarkets(venue);
+      });
+    }
+
     async function load() {
-      await Promise.all([loadSummary(), loadMarkets(), loadPairs()]);
+      await Promise.all([loadSummary(), loadAllVenueMarkets(), loadPairs()]);
     }
 
     document.getElementById('refresh').addEventListener('click', load);
-    document.getElementById('market-apply').addEventListener('click', () => {
-      marketState.offset = 0;
-      marketState.q = document.getElementById('market-search').value.trim();
-      marketState.venue = document.getElementById('market-venue').value;
-      loadMarkets();
-    });
-    document.getElementById('market-search').addEventListener('keydown', (event) => {
-      if (event.key === 'Enter') document.getElementById('market-apply').click();
-    });
-    document.getElementById('markets-prev').addEventListener('click', () => {
-      marketState.offset = Math.max(0, marketState.offset - PAGE_SIZE);
-      loadMarkets();
-    });
-    document.getElementById('markets-next').addEventListener('click', () => {
-      marketState.offset += PAGE_SIZE;
-      loadMarkets();
-    });
+    wireVenueMarketControls('kalshi');
+    wireVenueMarketControls('polymarket');
     document.getElementById('pair-apply').addEventListener('click', () => {
       pairState.offset = 0;
       pairState.q = document.getElementById('pair-search').value.trim();
@@ -459,11 +523,11 @@
       if (event.key === 'Enter') document.getElementById('pair-apply').click();
     });
     document.getElementById('pairs-prev').addEventListener('click', () => {
-      pairState.offset = Math.max(0, pairState.offset - PAGE_SIZE);
+      pairState.offset = Math.max(0, pairState.offset - PAIR_PAGE_SIZE);
       loadPairs();
     });
     document.getElementById('pairs-next').addEventListener('click', () => {
-      pairState.offset += PAGE_SIZE;
+      pairState.offset += PAIR_PAGE_SIZE;
       loadPairs();
     });
 
