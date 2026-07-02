@@ -59,6 +59,20 @@ Strong success criteria let you loop independently. Weak criteria ("make it work
 - Keep functions small and focused.
 - Prefer modern, clean Python idioms.
 
+## Testing & Reliability
+
+- Write or update tests for new/changed functionality (unit for core logic, integration for jobs/pipelines).
+- Use DuckDB for testing analytics queries where possible.
+- Make jobs idempotent and resumable.
+- Add input validation and graceful error handling with retries (especially for API polling and R2/D1 operations).
+- Prefer deterministic behavior and clear logging for debugging scheduled jobs.
+
+## Documentation
+
+- Update README.md or relevant docs when adding features, new CLI commands, or changing architecture.
+- Include usage examples for new CLI commands.
+- Keep architecture diagrams (text-based) up to date if present.
+
 ## Git & Commit Workflow
 
 After any code change or refactor you perform:
