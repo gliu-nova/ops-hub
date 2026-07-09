@@ -48,35 +48,9 @@
       <div id="links" class="links muted">Loading…</div>
     </section>
   </main>
+  <script src="/js/shared.js"></script>
   <script>
-    function formatRelativeTime(iso) {
-      if (!iso) return 'never';
-      const then = new Date(iso).getTime();
-      if (Number.isNaN(then)) return iso;
-      const minutes = Math.floor((Date.now() - then) / 60000);
-      if (minutes < 1) return 'just now';
-      if (minutes === 1) return '1 minute ago';
-      if (minutes < 60) return `${minutes} minutes ago`;
-      const hours = Math.floor(minutes / 60);
-      if (hours === 1) return '1 hour ago';
-      if (hours < 48) return `${hours} hours ago`;
-      const days = Math.floor(hours / 24);
-      return days === 1 ? '1 day ago' : `${days} days ago`;
-    }
-
-    function freshnessBadge(iso, healthyMinutes, delayedMinutes) {
-      if (!iso) return '<span class="badge badge-bad">No data</span>';
-      const minutes = Math.floor((Date.now() - new Date(iso).getTime()) / 60000);
-      if (minutes <= healthyMinutes) return '<span class="badge badge-ok">Healthy</span>';
-      if (minutes <= delayedMinutes) return '<span class="badge badge-warn">Delayed</span>';
-      return '<span class="badge badge-bad">Stale</span>';
-    }
-
-    function statusClass(status) {
-      if (status === 'ok') return 'ok';
-      if (status === 'degraded') return 'warn';
-      return 'bad';
-    }
+    const { escapeHtml, formatRelativeTime, freshnessBadge, statusClass, healthVenues } = OpsHub;
 
     function formatPostQuota(details) {
       const postsToday = details?.posts_today;
@@ -107,17 +81,19 @@
       }
       const details = data.details || {};
       const health = details.api_health || {};
-      const healthLine = Object.entries(health).map(([k, v]) => `${k}: <span class="${v === 'ok' ? 'ok' : 'bad'}">${v}</span>`).join(' · ');
+      const healthLine = Object.entries(health).map(([k, v]) =>
+        `${escapeHtml(k)}: <span class="${v === 'ok' ? 'ok' : 'bad'}">${escapeHtml(v)}</span>`
+      ).join(' · ');
       const runPosts = typeof details.posted_tweets === 'number'
         ? `${details.posted_tweets} this run`
         : '—';
       el.innerHTML = `
         <div class="grid">
           <div>${freshnessBadge(data.reported_at, 90, 180)}</div>
-          <div><strong>Status:</strong> <span class="${statusClass(data.status)}">${data.status}</span></div>
-          <div><strong>Last run:</strong> ${formatRelativeTime(data.reported_at)} <span class="muted">(${new Date(data.reported_at).toLocaleString()})</span></div>
-          <div><strong>Summary:</strong> ${data.summary || '—'}</div>
-          <div><strong>Daily quota:</strong> ${formatPostQuota(details)} <span class="muted">(${runPosts})</span></div>
+          <div><strong>Status:</strong> <span class="${statusClass(data.status)}">${escapeHtml(data.status)}</span></div>
+          <div><strong>Last run:</strong> ${formatRelativeTime(data.reported_at)} <span class="muted">(${escapeHtml(new Date(data.reported_at).toLocaleString())})</span></div>
+          <div><strong>Summary:</strong> ${escapeHtml(data.summary || '—')}</div>
+          <div><strong>Daily quota:</strong> ${formatPostQuota(details)} <span class="muted">(${escapeHtml(runPosts)})</span></div>
           <div><strong>Emergency posts:</strong> ${formatEmergencyPosts(details)}</div>
           <div><strong>API health:</strong> ${healthLine || '—'}</div>
         </div>
@@ -134,51 +110,28 @@
       el.innerHTML = `
         <div class="grid">
           <div>${freshnessBadge(data.reported_at, 90, 180)}</div>
-          <div><strong>Sync mode:</strong> ${mm.liquidations_mode || '—'}</div>
-          <div><strong>Last ingested:</strong> ${mm.ingested ?? '—'} event(s)</div>
-          <div><strong>Total events in DB:</strong> ${mm.total_events ?? '—'}</div>
+          <div><strong>Status:</strong> <span class="${statusClass(data.status)}">${escapeHtml(data.status || '—')}</span></div>
+          <div><strong>Sync mode:</strong> ${escapeHtml(mm.liquidations_mode || '—')}</div>
+          <div><strong>Last ingested:</strong> ${escapeHtml(mm.ingested ?? '—')} event(s)</div>
+          <div><strong>Total events in DB:</strong> ${escapeHtml(mm.total_events ?? '—')}</div>
           <div><strong>Sync skipped:</strong> ${mm.skipped ? 'yes' : 'no'}</div>
         </div>
       `;
     }
 
-    function sourceStatus(value) {
-      const ok = value === 'ok' || value === 'configured';
-      return `<span class="${ok ? 'ok' : 'bad'}">${value || 'unknown'}</span>`;
-    }
-
-    function pmdVenues(pmd) {
-      if (pmd.venues) return pmd.venues;
-      const ingestion = pmd.ingestion || {};
-      return {
-        kalshi: {
-          markets_ingested: ingestion.kalshi_markets ?? 0,
-          markets_in_pairs: ingestion.matched_pairs ?? 0,
-          active_signals: pmd.output?.active_opportunities ?? pmd.active_opportunities ?? 0,
-          signals_total: pmd.output?.signals_total ?? pmd.signals_total ?? 0,
-        },
-        polymarket: {
-          markets_ingested: ingestion.polymarket_markets ?? 0,
-          markets_in_pairs: ingestion.matched_pairs ?? 0,
-          active_signals: pmd.output?.active_opportunities ?? pmd.active_opportunities ?? 0,
-          signals_total: pmd.output?.signals_total ?? pmd.signals_total ?? 0,
-        },
-      };
-    }
-
     function formatPmdIngestion(pmd) {
-      const venues = pmdVenues(pmd);
+      const venues = healthVenues(pmd);
       const sources = pmd.sources || {};
       const mode = sources.mode || '—';
       return `
         <span class="venue-line"><strong>Kalshi</strong> ${venues.kalshi.markets_ingested.toLocaleString()} ingested · ${venues.kalshi.markets_in_pairs.toLocaleString()} in pairs</span>
         <span class="venue-line"><strong>Polymarket</strong> ${venues.polymarket.markets_ingested.toLocaleString()} ingested · ${venues.polymarket.markets_in_pairs.toLocaleString()} in pairs</span>
-        <span class="muted">${mode}</span>
+        <span class="muted">${escapeHtml(mode)}</span>
       `;
     }
 
     function formatPmdOutput(pmd) {
-      const venues = pmdVenues(pmd);
+      const venues = healthVenues(pmd);
       return `
         <span class="venue-line"><strong>Kalshi</strong> ${venues.kalshi.active_signals.toLocaleString()} active · ${venues.kalshi.signals_total.toLocaleString()} total signals</span>
         <span class="venue-line"><strong>Polymarket</strong> ${venues.polymarket.active_signals.toLocaleString()} active · ${venues.polymarket.signals_total.toLocaleString()} total signals</span>
@@ -189,7 +142,7 @@
       const el = document.getElementById('pmd');
       if (!pmd || pmd.status === 'error') {
         el.innerHTML = `
-          <p class="bad">Could not reach PMD health: ${pmd?.error || 'unknown'}</p>
+          <p class="bad">Could not reach PMD health: ${escapeHtml(pmd?.error || 'unknown')}</p>
           <p><a class="detail-link" href="/pmd.html">View ingestion &amp; output details →</a></p>
         `;
         return;
@@ -197,7 +150,7 @@
       el.innerHTML = `
         <div class="grid">
           <div>${freshnessBadge(pmd.last_poll_at, 20, 60)}</div>
-          <div><strong>Status:</strong> <span class="${statusClass(pmd.status)}">${pmd.status}</span> · <strong>Last poll:</strong> ${formatRelativeTime(pmd.last_poll_at)}</div>
+          <div><strong>Status:</strong> <span class="${statusClass(pmd.status)}">${escapeHtml(pmd.status)}</span> · <strong>Last poll:</strong> ${formatRelativeTime(pmd.last_poll_at)}</div>
           <div class="venue-summary"><strong>Ingestion</strong>${formatPmdIngestion(pmd)}</div>
           <div class="venue-summary"><strong>Output</strong>${formatPmdOutput(pmd)}</div>
           <div><a class="detail-link" href="/pmd.html">View ingestion &amp; output details →</a></div>
@@ -206,25 +159,35 @@
     }
 
     async function load() {
-      const res = await fetch('/api/services');
-      const data = await res.json();
-      document.getElementById('overview').innerHTML = `
-        <div class="grid">
-          <div><strong>Dashboard updated:</strong> ${new Date(data.updated_at).toLocaleString()}</div>
-          <div class="muted">twitter-bot + market-memory report via heartbeat; PMD polled live.</div>
-        </div>
-      `;
-      renderTwitterBot(data.twitter_bot);
-      renderMarketMemory(data.market_memory);
-      renderPmd(data.prediction_market_divergence);
-      const links = { pmd_ingestion_output: '/pmd.html', ...(data.links || {}) };
-      document.getElementById('links').innerHTML = Object.entries(links)
-        .map(([k, url]) => {
-          const external = url.startsWith('http');
-          const attrs = external ? ' target="_blank" rel="noopener"' : '';
-          return `<a href="${url}"${attrs}>${k.replaceAll('_', ' ')}</a>`;
-        })
-        .join('');
+      try {
+        const res = await fetch('/api/services');
+        if (!res.ok) {
+          throw new Error(`HTTP ${res.status}`);
+        }
+        const data = await res.json();
+        document.getElementById('overview').innerHTML = `
+          <div class="grid">
+            <div><strong>Dashboard updated:</strong> ${escapeHtml(new Date(data.updated_at).toLocaleString())}</div>
+            <div class="muted">twitter-bot + market-memory report via heartbeat; PMD polled live.</div>
+          </div>
+        `;
+        renderTwitterBot(data.twitter_bot);
+        renderMarketMemory(data.market_memory);
+        renderPmd(data.prediction_market_divergence);
+        const links = { pmd_ingestion_output: '/pmd.html', ...(data.links || {}) };
+        document.getElementById('links').innerHTML = Object.entries(links)
+          .map(([k, url]) => {
+            const safeUrl = escapeHtml(url);
+            const external = String(url).startsWith('http');
+            const attrs = external ? ' target="_blank" rel="noopener"' : '';
+            return `<a href="${safeUrl}"${attrs}>${escapeHtml(k.replaceAll('_', ' '))}</a>`;
+          })
+          .join('');
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        document.getElementById('overview').innerHTML =
+          `<p class="bad">Failed to load services: ${escapeHtml(message)}</p>`;
+      }
     }
 
     document.getElementById('refresh').addEventListener('click', load);

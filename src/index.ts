@@ -1,47 +1,57 @@
 import { Hono } from "hono";
 import { cors } from "hono/cors";
-import { ensureTables, getHeartbeat, listHeartbeats, upsertHeartbeat } from "./storage";
-import type { Env, HeartbeatPayload, PmdDetailResponse, PmdHealth, PmdSignal } from "./types";
+import {
+  authorizeHeartbeat,
+  deriveEmbeddedMarketMemoryStatus,
+  fetchPmdHealthCached,
+  fetchPmdJson,
+  pmdBaseUrl,
+  validateHeartbeatBody,
+} from "./helpers";
+import { getHeartbeat, listHeartbeats, upsertHeartbeat } from "./storage";
+import type { Env, PmdDetailResponse, PmdHealth, PmdSignal, StoredHeartbeat } from "./types";
 
 const app = new Hono<{ Bindings: Env }>();
 
-app.use("*", cors({ origin: "*" }));
-app.use("*", async (c, next) => {
-  await ensureTables(c.env.DB);
-  await next();
-});
+const DEFAULT_PMD_HEALTH_URL = "https://prediction-market-divergence.pages.dev/health";
 
-function authHeartbeat(c: { env: Env; req: { header: (name: string) => string | undefined } }): boolean {
-  const secret = c.env.HEARTBEAT_SECRET;
-  if (!secret) return true;
-  const auth = c.req.header("Authorization") ?? "";
-  return auth === `Bearer ${secret}`;
+/** Same-origin dashboard does not need open CORS; allow only configured origin if set. */
+app.use(
+  "*",
+  cors({
+    origin: (origin, c) => {
+      const allowed = c.env.CORS_ORIGIN;
+      if (!allowed) return null;
+      if (allowed === "*") return "*";
+      return origin === allowed ? origin : null;
+    },
+    allowMethods: ["GET", "POST", "OPTIONS"],
+    allowHeaders: ["Content-Type", "Authorization"],
+  }),
+);
+
+function pmdHealthUrl(env: Env): string {
+  return env.PMD_HEALTH_URL ?? DEFAULT_PMD_HEALTH_URL;
 }
 
-function pmdBaseUrl(healthUrl: string): string {
-  return healthUrl.replace(/\/health\/?$/, "");
-}
-
-async function fetchPmdJson<T>(url: string): Promise<T | { status: "error"; error: string }> {
-  try {
-    const resp = await fetch(url, { headers: { accept: "application/json" } });
-    if (!resp.ok) {
-      return { status: "error", error: `HTTP ${resp.status}` };
-    }
-    return (await resp.json()) as T;
-  } catch (err) {
-    return { status: "error", error: err instanceof Error ? err.message : String(err) };
-  }
-}
-
-async function fetchPmdHealth(url: string): Promise<PmdHealth | { status: "error"; error: string }> {
-  return fetchPmdJson<PmdHealth>(url);
+function embeddedMarketMemory(twitterBot: StoredHeartbeat): StoredHeartbeat | null {
+  const mm = twitterBot.details?.market_memory;
+  if (!mm || typeof mm !== "object" || Array.isArray(mm)) return null;
+  const details = mm as Record<string, unknown>;
+  return {
+    service_id: "market-memory",
+    status: deriveEmbeddedMarketMemoryStatus(details),
+    reported_at: twitterBot.reported_at,
+    summary: "Embedded in twitter-bot sync",
+    details,
+    links: twitterBot.links,
+  };
 }
 
 async function fetchPmdDetail(healthUrl: string): Promise<PmdDetailResponse> {
   const base = pmdBaseUrl(healthUrl);
   const [health, opportunities, signals] = await Promise.all([
-    fetchPmdHealth(healthUrl),
+    fetchPmdJson<PmdHealth>(healthUrl),
     fetchPmdJson<{ opportunities: PmdSignal[]; count: number }>(`${base}/opportunities?limit=50`),
     fetchPmdJson<{ signals: PmdSignal[]; count: number }>(`${base}/signals?limit=50`),
   ]);
@@ -62,34 +72,40 @@ app.get("/health", (c) =>
 );
 
 app.post("/heartbeat", async (c) => {
-  if (!authHeartbeat(c)) {
+  const auth = authorizeHeartbeat(c.env.HEARTBEAT_SECRET, c.req.header("Authorization"));
+  if (auth === "misconfigured") {
+    return c.json({ detail: "HEARTBEAT_SECRET is not configured" }, 503);
+  }
+  if (auth === "unauthorized") {
     return c.json({ detail: "Unauthorized" }, 401);
   }
-  const body = (await c.req.json()) as HeartbeatPayload;
-  if (!body.service_id || !body.status) {
-    return c.json({ detail: "service_id and status required" }, 400);
+
+  let body: unknown;
+  try {
+    body = await c.req.json();
+  } catch {
+    return c.json({ detail: "Invalid JSON body" }, 400);
   }
-  await upsertHeartbeat(c.env.DB, body);
-  return c.json({ status: "ok", service_id: body.service_id });
+
+  const validated = validateHeartbeatBody(body);
+  if (!validated.ok) {
+    return c.json({ detail: validated.detail }, 400);
+  }
+
+  await upsertHeartbeat(c.env.DB, validated.payload);
+  return c.json({ status: "ok", service_id: validated.payload.service_id });
 });
 
 app.get("/api/services", async (c) => {
   const heartbeats = await listHeartbeats(c.env.DB);
   const twitterBot = heartbeats.find((h) => h.service_id === "twitter-bot") ?? null;
-  const marketMemory = heartbeats.find((h) => h.service_id === "market-memory") ?? null;
-  const pmdUrl = c.env.PMD_HEALTH_URL ?? "https://prediction-market-divergence.pages.dev/health";
-  const pmd = await fetchPmdHealth(pmdUrl);
+  const marketMemoryRow = heartbeats.find((h) => h.service_id === "market-memory") ?? null;
+  const pmdUrl = pmdHealthUrl(c.env);
+  const pmd = await fetchPmdHealthCached<PmdHealth>(pmdUrl);
   return c.json({
     updated_at: new Date().toISOString(),
     twitter_bot: twitterBot,
-    market_memory: marketMemory ?? (twitterBot?.details?.market_memory ? {
-      service_id: "market-memory",
-      status: twitterBot.status,
-      reported_at: twitterBot.reported_at,
-      summary: "Embedded in twitter-bot sync",
-      details: twitterBot.details.market_memory,
-      links: twitterBot.links,
-    } : null),
+    market_memory: marketMemoryRow ?? (twitterBot ? embeddedMarketMemory(twitterBot) : null),
     prediction_market_divergence: pmd,
     links: {
       github_twitter_bot: "https://github.com/gliu-nova/twitter-bot/actions",
@@ -101,13 +117,11 @@ app.get("/api/services", async (c) => {
 });
 
 app.get("/api/pmd", async (c) => {
-  const pmdUrl = c.env.PMD_HEALTH_URL ?? "https://prediction-market-divergence.pages.dev/health";
-  return c.json(await fetchPmdDetail(pmdUrl));
+  return c.json(await fetchPmdDetail(pmdHealthUrl(c.env)));
 });
 
 app.get("/api/pmd/markets", async (c) => {
-  const pmdUrl = c.env.PMD_HEALTH_URL ?? "https://prediction-market-divergence.pages.dev/health";
-  const base = pmdBaseUrl(pmdUrl);
+  const base = pmdBaseUrl(pmdHealthUrl(c.env));
   const params = new URLSearchParams();
   for (const key of ["offset", "limit", "venue", "q"] as const) {
     const value = c.req.query(key);
@@ -119,8 +133,7 @@ app.get("/api/pmd/markets", async (c) => {
 });
 
 app.get("/api/pmd/pairs", async (c) => {
-  const pmdUrl = c.env.PMD_HEALTH_URL ?? "https://prediction-market-divergence.pages.dev/health";
-  const base = pmdBaseUrl(pmdUrl);
+  const base = pmdBaseUrl(pmdHealthUrl(c.env));
   const params = new URLSearchParams();
   for (const key of ["offset", "limit", "q"] as const) {
     const value = c.req.query(key);

@@ -7,5 +7,6 @@
     "skipLibCheck": true,
     "types": ["@cloudflare/workers-types"]
   },
-  "include": ["src/**/*.ts", "functions/**/*.ts"]
+  "include": ["src/**/*.ts", "functions/**/*.ts"],
+  "exclude": ["src/**/*.test.ts"]
 }

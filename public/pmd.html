@@ -141,36 +141,15 @@
       <div id="signals" class="item-list muted">Loading…</div>
     </section>
   </main>
+  <script src="/js/shared.js"></script>
   <script>
+    const { escapeHtml, formatRelativeTime, healthVenues } = OpsHub;
     const PAIR_PAGE_SIZE = 50;
     const pairState = { offset: 0, q: '' };
     const venueMarketState = {
       kalshi: { offset: 0, q: '', pageSize: 100 },
       polymarket: { offset: 0, q: '', pageSize: 100 },
     };
-
-    function formatRelativeTime(iso) {
-      if (!iso) return 'never';
-      const then = new Date(iso).getTime();
-      if (Number.isNaN(then)) return iso;
-      const minutes = Math.floor((Date.now() - then) / 60000);
-      if (minutes < 1) return 'just now';
-      if (minutes === 1) return '1 minute ago';
-      if (minutes < 60) return `${minutes} minutes ago`;
-      const hours = Math.floor(minutes / 60);
-      if (hours === 1) return '1 hour ago';
-      if (hours < 48) return `${hours} hours ago`;
-      const days = Math.floor(hours / 24);
-      return days === 1 ? '1 day ago' : `${days} days ago`;
-    }
-
-    function escapeHtml(value) {
-      return String(value)
-        .replace(/&/g, '&amp;')
-        .replace(/</g, '&lt;')
-        .replace(/>/g, '&gt;')
-        .replace(/"/g, '&quot;');
-    }
 
     function formatProb(value) {
       return `${(Number(value) * 100).toFixed(1)}%`;
@@ -181,42 +160,11 @@
       return Number(value).toLocaleString(undefined, { maximumFractionDigits: 0 });
     }
 
-    function sourceClass(value) {
-      return value === 'ok' || value === 'configured' ? 'ok' : 'bad';
-    }
-
     function pageLabel(offset, limit, total) {
       if (!total) return '0 of 0';
       const start = offset + 1;
       const end = Math.min(offset + limit, total);
       return `${start}–${end} of ${total.toLocaleString()}`;
-    }
-
-    function healthVenues(health) {
-      if (health?.venues) return health.venues;
-      const ingestion = health?.ingestion || {};
-      const output = health?.output || {};
-      const active = output.active_opportunities ?? health?.active_opportunities ?? 0;
-      const total = output.signals_total ?? health?.signals_total ?? 0;
-      const pairs = ingestion.matched_pairs ?? 0;
-      return {
-        kalshi: {
-          markets_ingested: ingestion.kalshi_markets ?? 0,
-          markets_in_pairs: pairs,
-          markets_enriched: null,
-          snapshots_stored: null,
-          active_signals: active,
-          signals_total: total,
-        },
-        polymarket: {
-          markets_ingested: ingestion.polymarket_markets ?? 0,
-          markets_in_pairs: pairs,
-          markets_enriched: null,
-          snapshots_stored: null,
-          active_signals: active,
-          signals_total: total,
-        },
-      };
     }
 
     function renderVenueCard(name, venue, data) {
@@ -479,11 +427,18 @@
     }
 
     async function loadSummary() {
-      const res = await fetch('/api/pmd');
-      const data = await res.json();
-      renderStatus(data.health);
-      renderVenueBreakdown(data.health);
-      renderOutput(data.health, data.opportunities, data.signals);
+      try {
+        const res = await fetch('/api/pmd');
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = await res.json();
+        renderStatus(data.health);
+        renderVenueBreakdown(data.health);
+        renderOutput(data.health, data.opportunities, data.signals);
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        document.getElementById('status').innerHTML =
+          `<p class="bad">Failed to load PMD summary: ${escapeHtml(message)}</p>`;
+      }
     }
 
     function wireVenueMarketControls(venue) {

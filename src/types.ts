@@ -4,6 +4,8 @@ export interface Env {
   HEARTBEAT_SECRET?: string;
   PMD_HEALTH_URL?: string;
   ENVIRONMENT?: string;
+  /** Optional browser origin allowed by CORS (e.g. https://ops-hub.pages.dev). Omit to disable CORS. */
+  CORS_ORIGIN?: string;
 }
 
 export interface HeartbeatPayload {
