@@ -10,8 +10,8 @@ database_id = "27f32641-0b1a-4072-bc2f-dfecd93b8fce"
 [vars]
 ENVIRONMENT = "production"
 PMD_HEALTH_URL = "https://prediction-market-divergence.pages.dev/health"
-# Same-origin dashboard needs no CORS. Set only if a browser on another origin must call the API.
-# CORS_ORIGIN = "https://ops-hub.pages.dev"
+# Browser dashboards on other origins (e.g. gliu.dev) need CORS for live refresh.
+CORS_ORIGIN = "https://gliu.dev"
 
 # Required for POST /heartbeat (fail-closed if unset):
 #   wrangler pages secret put HEARTBEAT_SECRET --project-name=ops-hub
