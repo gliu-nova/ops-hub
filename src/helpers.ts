@@ -145,7 +145,7 @@ export function parseHeartbeatRow(row: Record<string, unknown>): StoredHeartbeat
   };
 }
 
-/** Derive market-memory status from embedded details; do not inherit twitter-bot status. */
+/** Derive market-memory status from embedded details; do not inherit the parent heartbeat status. */
 export function deriveEmbeddedMarketMemoryStatus(details: Record<string, unknown>): HeartbeatStatus {
   const nestedStatus = details.status;
   if (typeof nestedStatus === "string" && HEARTBEAT_STATUSES.includes(nestedStatus as HeartbeatStatus)) {
@@ -158,6 +158,75 @@ export function deriveEmbeddedMarketMemoryStatus(details: Record<string, unknown
     return "degraded";
   }
   return "ok";
+}
+
+/** Payload keys that identify a bot/sync run, regardless of service_id. */
+const BOT_DETAIL_KEYS = ["api_health", "posted_tweets", "posts_today", "daily_post_cap", "market_memory"] as const;
+const MARKET_MEMORY_DETAIL_KEYS = ["liquidations_mode", "ingested", "total_events"] as const;
+
+export function reportedAtMs(iso: string): number {
+  const ms = Date.parse(iso);
+  return Number.isNaN(ms) ? 0 : ms;
+}
+
+export function isBotShapedHeartbeat(heartbeat: StoredHeartbeat): boolean {
+  const details = heartbeat.details ?? {};
+  return BOT_DETAIL_KEYS.some((key) => key in details);
+}
+
+export function isMarketMemoryDetails(details: Record<string, unknown>): boolean {
+  return MARKET_MEMORY_DETAIL_KEYS.some((key) => key in details);
+}
+
+/** Dedicated market-memory heartbeat (not a bot run that embeds a nested sync). */
+export function isStandaloneMarketMemory(heartbeat: StoredHeartbeat): boolean {
+  return isMarketMemoryDetails(heartbeat.details) && !isBotShapedHeartbeat(heartbeat);
+}
+
+export function latestHeartbeat(heartbeats: StoredHeartbeat[]): StoredHeartbeat | null {
+  if (heartbeats.length === 0) return null;
+  return heartbeats.reduce((best, heartbeat) =>
+    reportedAtMs(heartbeat.reported_at) >= reportedAtMs(best.reported_at) ? heartbeat : best,
+  );
+}
+
+/**
+ * Pick the live bot/sync heartbeat by payload shape and recency, not service_id.
+ * A rename (twitter-bot → cross-asset-signal-engine) must not freeze the dashboard
+ * on the abandoned row.
+ */
+export function selectPrimaryHeartbeat(heartbeats: StoredHeartbeat[]): StoredHeartbeat | null {
+  const botShaped = latestHeartbeat(heartbeats.filter(isBotShapedHeartbeat));
+  if (botShaped) return botShaped;
+  const notMarketMemory = heartbeats.filter((heartbeat) => !isStandaloneMarketMemory(heartbeat));
+  return latestHeartbeat(notMarketMemory) ?? latestHeartbeat(heartbeats);
+}
+
+/** Project nested market_memory details onto a synthetic heartbeat. */
+export function embeddedMarketMemory(primary: StoredHeartbeat): StoredHeartbeat | null {
+  const nested = primary.details?.market_memory;
+  if (!nested || typeof nested !== "object" || Array.isArray(nested)) return null;
+  const details = nested as Record<string, unknown>;
+  return {
+    service_id: "market-memory",
+    status: deriveEmbeddedMarketMemoryStatus(details),
+    reported_at: primary.reported_at,
+    summary: `Embedded in ${primary.service_id} sync`,
+    details,
+    links: primary.links,
+  };
+}
+
+export function selectMarketMemory(
+  heartbeats: StoredHeartbeat[],
+  primary: StoredHeartbeat | null,
+): StoredHeartbeat | null {
+  const standalone = latestHeartbeat(heartbeats.filter(isStandaloneMarketMemory));
+  const embedded = primary ? embeddedMarketMemory(primary) : null;
+  if (standalone && embedded) {
+    return reportedAtMs(standalone.reported_at) >= reportedAtMs(embedded.reported_at) ? standalone : embedded;
+  }
+  return standalone ?? embedded;
 }
 
 export type PmdFetchError = { status: "error"; error: string };

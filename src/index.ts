@@ -2,14 +2,15 @@ import { Hono } from "hono";
 import { cors } from "hono/cors";
 import {
   authorizeHeartbeat,
-  deriveEmbeddedMarketMemoryStatus,
   fetchPmdHealthCached,
   fetchPmdJson,
   pmdBaseUrl,
+  selectMarketMemory,
+  selectPrimaryHeartbeat,
   validateHeartbeatBody,
 } from "./helpers";
 import { getHeartbeat, listHeartbeats, upsertHeartbeat } from "./storage";
-import type { Env, PmdDetailResponse, PmdHealth, PmdSignal, StoredHeartbeat } from "./types";
+import type { Env, PmdDetailResponse, PmdHealth, PmdSignal } from "./types";
 
 const app = new Hono<{ Bindings: Env }>();
 
@@ -32,20 +33,6 @@ app.use(
 
 function pmdHealthUrl(env: Env): string {
   return env.PMD_HEALTH_URL ?? DEFAULT_PMD_HEALTH_URL;
-}
-
-function embeddedMarketMemory(twitterBot: StoredHeartbeat): StoredHeartbeat | null {
-  const mm = twitterBot.details?.market_memory;
-  if (!mm || typeof mm !== "object" || Array.isArray(mm)) return null;
-  const details = mm as Record<string, unknown>;
-  return {
-    service_id: "market-memory",
-    status: deriveEmbeddedMarketMemoryStatus(details),
-    reported_at: twitterBot.reported_at,
-    summary: "Embedded in twitter-bot sync",
-    details,
-    links: twitterBot.links,
-  };
 }
 
 async function fetchPmdDetail(healthUrl: string): Promise<PmdDetailResponse> {
@@ -98,20 +85,21 @@ app.post("/heartbeat", async (c) => {
 
 app.get("/api/services", async (c) => {
   const heartbeats = await listHeartbeats(c.env.DB);
-  const twitterBot = heartbeats.find((h) => h.service_id === "twitter-bot") ?? null;
-  const marketMemoryRow = heartbeats.find((h) => h.service_id === "market-memory") ?? null;
+  const primary = selectPrimaryHeartbeat(heartbeats);
+  const marketMemory = selectMarketMemory(heartbeats, primary);
   const pmdUrl = pmdHealthUrl(c.env);
   const pmd = await fetchPmdHealthCached<PmdHealth>(pmdUrl);
   return c.json({
     updated_at: new Date().toISOString(),
-    twitter_bot: twitterBot,
-    market_memory: marketMemoryRow ?? (twitterBot ? embeddedMarketMemory(twitterBot) : null),
+    // twitter_bot is a compatibility key (gliu.dev). Value is the newest bot-shaped heartbeat, not a name lookup.
+    twitter_bot: primary,
+    market_memory: marketMemory,
     prediction_market_divergence: pmd,
     links: {
-      github_twitter_bot: "https://github.com/gliu-nova/twitter-bot/actions",
-      github_market_memory: "https://github.com/gliu-nova/market-memory",
+      ...(primary?.links ?? {}),
+      github_twitter_bot: primary?.links.actions,
       github_pmd: "https://github.com/gliu-nova/prediction-market-divergence",
-      pmd_dashboard: "https://prediction-market-divergence.pages.dev/",
+      pmd_dashboard: `${pmdBaseUrl(pmdUrl)}/`,
     },
   });
 });

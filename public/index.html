@@ -10,7 +10,7 @@
   <main>
     <header>
       <h1>Ops Hub</h1>
-      <p class="subtitle">twitter-bot · market-memory · prediction-market-divergence</p>
+      <p class="subtitle">live heartbeats · prediction-market-divergence</p>
     </header>
 
     <section class="card">
@@ -24,7 +24,7 @@
     </section>
 
     <section class="card">
-      <h2>twitter-bot</h2>
+      <h2 id="bot-heading">heartbeat</h2>
       <div id="twitter-bot" class="muted">Loading…</div>
     </section>
 
@@ -75,10 +75,13 @@
 
     function renderTwitterBot(data) {
       const el = document.getElementById('twitter-bot');
+      const heading = document.getElementById('bot-heading');
       if (!data) {
-        el.innerHTML = '<p>No heartbeat yet. Runs push status after each GitHub Actions job.</p>';
+        heading.textContent = 'heartbeat';
+        el.innerHTML = '<p>No heartbeat yet. Runs push status after each job.</p>';
         return;
       }
+      heading.textContent = data.service_id || 'heartbeat';
       const details = data.details || {};
       const health = details.api_health || {};
       const healthLine = Object.entries(health).map(([k, v]) =>
@@ -103,7 +106,7 @@
     function renderMarketMemory(data) {
       const el = document.getElementById('market-memory');
       if (!data) {
-        el.innerHTML = '<p>No sync data yet (embedded in twitter-bot hourly run).</p>';
+        el.innerHTML = '<p>No sync data yet (embedded in the latest bot heartbeat).</p>';
         return;
       }
       const mm = data.details || data;
@@ -168,7 +171,7 @@
         document.getElementById('overview').innerHTML = `
           <div class="grid">
             <div><strong>Dashboard updated:</strong> ${escapeHtml(new Date(data.updated_at).toLocaleString())}</div>
-            <div class="muted">twitter-bot + market-memory report via heartbeat; PMD polled live.</div>
+            <div class="muted">Latest bot-shaped heartbeat + embedded market-memory; PMD polled live.</div>
           </div>
         `;
         renderTwitterBot(data.twitter_bot);
@@ -176,6 +179,7 @@
         renderPmd(data.prediction_market_divergence);
         const links = { pmd_ingestion_output: '/pmd.html', ...(data.links || {}) };
         document.getElementById('links').innerHTML = Object.entries(links)
+          .filter(([, url]) => typeof url === 'string' && url)
           .map(([k, url]) => {
             const safeUrl = escapeHtml(url);
             const external = String(url).startsWith('http');

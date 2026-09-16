@@ -3,14 +3,28 @@ import {
   authorizeHeartbeat,
   clearPmdHealthCache,
   deriveEmbeddedMarketMemoryStatus,
+  embeddedMarketMemory,
   fetchPmdHealthCached,
   fetchPmdJson,
   parseHeartbeatRow,
   pmdBaseUrl,
   resolveReportedAt,
+  selectMarketMemory,
+  selectPrimaryHeartbeat,
   timingSafeEqualString,
   validateHeartbeatBody,
 } from "./helpers";
+import type { StoredHeartbeat } from "./types";
+
+function heartbeat(overrides: Partial<StoredHeartbeat> & Pick<StoredHeartbeat, "service_id" | "reported_at">): StoredHeartbeat {
+  return {
+    status: "ok",
+    summary: null,
+    details: {},
+    links: {},
+    ...overrides,
+  };
+}
 
 describe("authorizeHeartbeat", () => {
   it("fails closed when secret is unset", () => {
@@ -112,11 +126,100 @@ describe("parseHeartbeatRow", () => {
 });
 
 describe("deriveEmbeddedMarketMemoryStatus", () => {
-  it("does not inherit twitter-bot status; uses nested fields", () => {
+  it("does not inherit parent heartbeat status; uses nested fields", () => {
     expect(deriveEmbeddedMarketMemoryStatus({ ingested: 3 })).toBe("ok");
     expect(deriveEmbeddedMarketMemoryStatus({ status: "degraded" })).toBe("degraded");
     expect(deriveEmbeddedMarketMemoryStatus({ error: "sync failed" })).toBe("error");
     expect(deriveEmbeddedMarketMemoryStatus({ skipped: true, reason: "rate limit" })).toBe("degraded");
+  });
+});
+
+describe("selectPrimaryHeartbeat", () => {
+  const staleBot: StoredHeartbeat = heartbeat({
+    service_id: "twitter-bot",
+    reported_at: "2026-09-08T00:32:18.000Z",
+    details: { api_health: { fred: "ok" }, market_memory: { ingested: 1 } },
+    links: { actions: "https://github.com/gliu-nova/twitter-bot/actions" },
+  });
+  const liveBot: StoredHeartbeat = heartbeat({
+    service_id: "cross-asset-signal-engine",
+    reported_at: "2026-09-15T11:32:21.000Z",
+    details: {
+      api_health: { fred: "ok" },
+      posts_today: 0,
+      market_memory: { ingested: 63, liquidations_mode: "coinalyze+okx", total_events: 11698 },
+    },
+    links: { actions: "https://github.com/gliu-nova/Cross-Asset-Signal-Engine/actions" },
+  });
+  const standaloneMm: StoredHeartbeat = heartbeat({
+    service_id: "market-memory",
+    reported_at: "2026-09-10T00:00:00.000Z",
+    details: { ingested: 9, liquidations_mode: "okx", total_events: 100 },
+  });
+
+  it("selects the newest bot-shaped heartbeat regardless of service_id", () => {
+    expect(selectPrimaryHeartbeat([staleBot, liveBot, standaloneMm])?.service_id).toBe(
+      "cross-asset-signal-engine",
+    );
+  });
+
+  it("falls back to the newest non-market-memory row when none are bot-shaped", () => {
+    const other = heartbeat({
+      service_id: "some-new-job",
+      reported_at: "2026-09-15T12:00:00.000Z",
+      details: { note: "plain heartbeat" },
+    });
+    expect(selectPrimaryHeartbeat([standaloneMm, other])?.service_id).toBe("some-new-job");
+  });
+
+  it("returns null for an empty list", () => {
+    expect(selectPrimaryHeartbeat([])).toBeNull();
+  });
+});
+
+describe("selectMarketMemory", () => {
+  it("embeds nested sync details from the selected primary, not a stale sibling", () => {
+    const stale = heartbeat({
+      service_id: "twitter-bot",
+      reported_at: "2026-09-08T00:32:18.000Z",
+      details: { api_health: {}, market_memory: { ingested: 70, total_events: 11305 } },
+    });
+    const live = heartbeat({
+      service_id: "renamed-bot",
+      reported_at: "2026-09-15T11:32:21.000Z",
+      details: { api_health: {}, market_memory: { ingested: 63, total_events: 11698 } },
+    });
+    const primary = selectPrimaryHeartbeat([stale, live]);
+    const mm = selectMarketMemory([stale, live], primary);
+    expect(mm?.details.ingested).toBe(63);
+    expect(mm?.details.total_events).toBe(11698);
+    expect(mm?.summary).toBe("Embedded in renamed-bot sync");
+  });
+
+  it("prefers a newer standalone market-memory heartbeat over embedded details", () => {
+    const primary = heartbeat({
+      service_id: "bot",
+      reported_at: "2026-09-15T10:00:00.000Z",
+      details: { api_health: {}, market_memory: { ingested: 1 } },
+    });
+    const standalone = heartbeat({
+      service_id: "mm-worker",
+      reported_at: "2026-09-15T11:00:00.000Z",
+      details: { ingested: 4, liquidations_mode: "okx" },
+    });
+    const mm = selectMarketMemory([primary, standalone], primary);
+    expect(mm?.service_id).toBe("mm-worker");
+    expect(mm?.details.ingested).toBe(4);
+  });
+
+  it("returns null when neither embedded nor standalone market-memory exists", () => {
+    const primary = heartbeat({
+      service_id: "bot",
+      reported_at: "2026-09-15T10:00:00.000Z",
+      details: { api_health: { fred: "ok" } },
+    });
+    expect(selectMarketMemory([primary], primary)).toBeNull();
+    expect(embeddedMarketMemory(primary)).toBeNull();
   });
 });
 
